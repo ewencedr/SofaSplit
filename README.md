@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/logo.png" width="160" alt="SofaSplit logo"></p>
+
 # SofaSplit
 
 **Split-screen co-op on one Mac** for games that only have online or LAN multiplayer.
@@ -21,7 +23,8 @@ Requires macOS 14 or later, on Apple Silicon or Intel. No other permissions or d
 
 ## Play
 
-1. **Connect the controllers** (Bluetooth or USB). PlayStation, Xbox, Switch Pro and most other gamepads work.
+1. **Connect the controllers** (Bluetooth or USB). PlayStation, Xbox, Switch Pro and most other gamepads work. A
+   controller can switch between cable and Bluetooth at any time and stays the same player.
 2. **Add a game:** click **Add Game → From Steam Library…** and pick it, or **Choose App…** for games from
    elsewhere. SofaSplit checks the game and tells you how likely it is to work.
 3. **Pick a layout** (side by side, top/bottom, 3, 4, … players).
@@ -51,7 +54,7 @@ Not supported: Mac App Store games (they're encrypted) and games with anti-cheat
 | Game | Status | Notes |
 |---|---|---|
 | Escape Simulator 2 | ✅ Works | Host in Player 1, join with the lobby code. Has its own optimized settings |
-| Human Fall Flat | ✅ Works | Player 1: Play → Online → Host. Others: Play → Online, pick Player 1's game |
+| Human Fall Flat | ✅ Works | Player 1: Play → Online → Host. Others: Play → Online, pick Player 1's game. PS4 controllers on Bluetooth work too, which the game can't read on its own on current macOS |
 | Golf With Your Friends | ❌ Doesn't work | Its online service (Photon) checks the Steam account and refuses the same account twice |
 
 Tried a game? Please [report it](https://github.com/ewencedr/SofaSplit/issues/new?template=game-report.md),
@@ -64,7 +67,10 @@ whether it worked or not, so the list grows.
   - *Route Steam Input controllers*: turn on if every controller moves every window.
   - *Separate saves for each player*: turn off if the game can't find its save or settings.
   - *Keep every window running* and *Borderless windows*: turn off if a game misbehaves with them.
-- **A window stays black:** wait a minute. macOS checks every new copy of a game the first time it starts.
+- **A window stays black:** wait a minute. macOS checks every new copy of a game the first time it starts (Intel
+  games also get translated by Rosetta the first time).
+- **A controller does nothing in one window:** make sure it's switched on before you press Play. If a controller
+  switched itself off, wake it with its PS / Home button: it reconnects to the same window.
 - **Still stuck?** Click **Copy Diagnostics** and paste it into a [bug report](https://github.com/ewencedr/SofaSplit/issues/new?template=bug.md).
 
 ---
@@ -90,8 +96,9 @@ Releases are built by GitHub Actions: pushing a tag like `v0.2.0` publishes `Sof
 | Problem | What SofaSplit does |
 |---|---|
 | A game only runs once | Each player gets an APFS clone of the `.app` (no extra disk space) with its own bundle ID, launched directly |
-| Every window reacts to every controller | `libSofaSplitHook.dylib`, injected with `DYLD_INSERT_LIBRARIES`, hides all but the assigned pad from IOKit HID, GameController and Steam Input |
-| Background windows pause | The hook keeps the app "active", drops resign-active notifications, enables background controller events and disables App Nap |
+| Every window reacts to every controller | `libSofaSplitHook.dylib`, injected with `DYLD_INSERT_LIBRARIES`, hides all but the assigned pad from IOKit HID, GameController and Steam Input. Pads are recognised by their Bluetooth address, so cable ↔ Bluetooth switches keep the player |
+| Older games ignore PS4 controllers on Bluetooth | macOS puts a Bluetooth DUALSHOCK 4 into its extended report mode, which games reading HID elements (Unity's old input) can't parse. The hook decodes report 0x11 and feeds them normal button and axis values |
+| Background windows pause | The hook keeps the app "active", hides focus-loss notifications and the engine's own resign handlers (Unity stops reading controllers otherwise), enables background controller events and disables App Nap |
 | Windows need tiling | The hook places each window in its slot, borderless, and blocks native fullscreen (Accessibility API as fallback) |
 | Copies on one Steam account can't join each other | The hook gives each copy its own Steam ID (from the unused "web instance" range) and runs Steam lobbies, the lobby list, `ISteamNetworkingMessages` and the older `ISteamNetworking` P2P API locally between the copies over Unix sockets, for both current and older Steamworks.NET. Login, ownership, DLC, achievements and cloud saves still go through the real Steam client |
 | Every game is different | The analyzer (`GameAnalyzer.swift`) detects the engine, the Steam app ID and which Steam APIs the game's code calls, and sets options; JavaScript handlers cover the rest |

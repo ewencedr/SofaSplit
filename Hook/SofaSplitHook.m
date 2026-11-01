@@ -15,6 +15,8 @@
 //   SOFASPLIT_FORCE_FOCUS       "1"
 //   SOFASPLIT_WINDOW_FRAME      "x,y,w,h" in Cocoa global coordinates
 //   SOFASPLIT_BORDERLESS        "1"
+//   SOFASPLIT_LEGACY_PAD_NAMES  "1"  report PlayStation 4 pads by the name older macOS gave them
+//   SOFASPLIT_DS4_BLUETOOTH     "1"  decode Bluetooth DUALSHOCK 4 reports for HID-element readers (DualShock4Bluetooth.m)
 //   SOFASPLIT_HOOK_LOG          path of a log file (default stderr)
 
 #import <AppKit/AppKit.h>
@@ -47,6 +49,9 @@ void SofaSplitHookLog(NSString *fmt, ...) {
     fflush(out);
 }
 #define HookLog SofaSplitHookLog
+
+// DualShock4Bluetooth.m
+void SofaSplitDS4Init(BOOL enabled);
 
 // SteamLobbyEmu.m
 void SofaSplitSteamEmuInit(NSDictionary<NSString *, NSString *> *env);
@@ -105,26 +110,88 @@ static BOOL IsGamepad(IOHIDDeviceRef d) {
            IOHIDDeviceConformsTo(d, kHIDPage_GenericDesktop, kHIDUsage_GD_MultiAxisController);
 }
 
+// Bluetooth addresses of the assigned pads (from SOFASPLIT_DEVICE_TOKENS): a pad that switches between cable and
+// Bluetooth mid-game reappears under a new key but keeps its address.
+static NSSet<NSString *> *gAllowedAddresses;
+
+static NSString *HexString(const uint8_t *bytes, int count, BOOL reversed) {
+    NSMutableString *s = [NSMutableString string];
+    for (int i = 0; i < count; i++) [s appendFormat:@"%02x", bytes[reversed ? count - 1 - i : i]];
+    return s;
+}
+
+// Must stay in sync with ControllerIdentity.hardwareAddress(of:) in SofaSplitCore.
+static NSString *HardwareAddress(IOHIDDeviceRef d, io_service_t service) {
+    CFTypeRef serial = IOHIDDeviceGetProperty(d, CFSTR(kIOHIDSerialNumberKey));
+    if (serial && CFGetTypeID(serial) == CFStringGetTypeID()) {
+        NSMutableString *hex = [NSMutableString string];
+        for (NSUInteger i = 0; i < [(__bridge NSString *)serial length]; i++) {
+            unichar ch = [(__bridge NSString *)serial characterAtIndex:i];
+            if (isxdigit(ch)) [hex appendFormat:@"%C", (unichar)tolower(ch)];
+        }
+        if (hex.length == 12) return hex;
+    }
+    CFTypeRef vidRef = IOHIDDeviceGetProperty(d, CFSTR(kIOHIDVendorIDKey));
+    CFTypeRef pidRef = IOHIDDeviceGetProperty(d, CFSTR(kIOHIDProductIDKey));
+    int vid = 0, pid = 0;
+    if (vidRef) CFNumberGetValue(vidRef, kCFNumberIntType, &vid);
+    if (pidRef) CFNumberGetValue(pidRef, kCFNumberIntType, &pid);
+    if (vid != 0x054c) return nil;
+    uint8_t reportID;
+    CFIndex length;
+    if (pid == 0x05c4 || pid == 0x09cc) { reportID = 0x12; length = 16; }
+    else if (pid == 0x0ce6 || pid == 0x0df2) { reportID = 0x09; length = 20; }
+    else return nil;
+    uint8_t buffer[20] = {reportID};
+    // The game's device may not be open yet: read through a device of our own.
+    IOHIDDeviceRef own = service ? IOHIDDeviceCreate(kCFAllocatorDefault, service) : NULL;
+    if (!own) return nil;
+    NSString *address = nil;
+    if (IOHIDDeviceOpen(own, kIOHIDOptionsTypeNone) == kIOReturnSuccess) {
+        if (IOHIDDeviceGetReport(own, kIOHIDReportTypeFeature, reportID, buffer, &length) == kIOReturnSuccess && length >= 7)
+            address = HexString(buffer + 1, 6, YES);
+        IOHIDDeviceClose(own, kIOHIDOptionsTypeNone);
+    }
+    CFRelease(own);
+    return [address isEqualToString:@"000000000000"] ? nil : address;
+}
+
+// Keyed by the IORegistry entry ID, which identifies the physical device for as long as it is connected.
+// (Not by IOHIDDeviceRef: those are freed and their addresses reused for other devices.)
 static os_unfair_lock gCacheLock = OS_UNFAIR_LOCK_INIT;
-static CFMutableDictionaryRef gDeviceCache;  // IOHIDDeviceRef (unretained) -> CFBoolean
+static NSMutableDictionary<NSNumber *, NSNumber *> *gDeviceCache;
 
 static BOOL DeviceAllowed(IOHIDDeviceRef d) {
     if (!gAllowedKeys || !d) return YES;
+    io_service_t service = IOHIDDeviceGetService(d);
+    uint64_t rid = 0;
+    if (service) IORegistryEntryGetRegistryEntryID(service, &rid);
+    if (!rid) return YES;  // can't tell which device (e.g. already gone): don't hide a removal from the game
     os_unfair_lock_lock(&gCacheLock);
-    CFBooleanRef cached = gDeviceCache ? CFDictionaryGetValue(gDeviceCache, d) : NULL;
+    NSNumber *cached = rid ? gDeviceCache[@(rid)] : nil;
     os_unfair_lock_unlock(&gCacheLock);
-    if (cached) return CFBooleanGetValue(cached);
+    if (cached) return cached.boolValue;
 
     BOOL allowed = YES;
     if (IsGamepad(d)) {
-        NSString *key = KeyForService(IOHIDDeviceGetService(d));
+        NSString *key = KeyForService(service);
         allowed = key && [gAllowedKeys containsObject:key];
-        HookLog(@"HID gamepad %@ -> %@", key ?: @"(unknown)", allowed ? @"visible" : @"hidden");
+        NSString *how = @"";
+        if (!allowed && gAllowedAddresses.count) {
+            NSString *address = HardwareAddress(d, service);
+            if (address && [gAllowedAddresses containsObject:address]) {
+                allowed = YES;
+                how = @" (same controller, other connection)";
+            }
+        }
+        HookLog(@"HID gamepad %@ -> %@%@", key ?: @"(unknown)", allowed ? @"visible" : @"hidden", how);
     }
-    os_unfair_lock_lock(&gCacheLock);
-    if (!gDeviceCache) gDeviceCache = CFDictionaryCreateMutable(NULL, 0, NULL, &kCFTypeDictionaryValueCallBacks);
-    CFDictionarySetValue(gDeviceCache, d, allowed ? kCFBooleanTrue : kCFBooleanFalse);
-    os_unfair_lock_unlock(&gCacheLock);
+    if (rid) {
+        os_unfair_lock_lock(&gCacheLock);
+        if (!gDeviceCache) gDeviceCache = [NSMutableDictionary dictionary];
+        gDeviceCache[@(rid)] = @(allowed);
+        os_unfair_lock_unlock(&gCacheLock);
+    }
     return allowed;
 }
 
@@ -134,6 +201,20 @@ typedef struct { IOHIDValueCallback cb; void *ctx; } NHValueCallback;
 static void NH_DeviceTrampoline(void *ctx, IOReturn r, void *sender, IOHIDDeviceRef d) {
     NHDeviceCallback *w = ctx;
     if (DeviceAllowed(d)) w->cb(w->ctx, r, sender, d);
+}
+
+static void NH_RemovalTrampoline(void *ctx, IOReturn r, void *sender, IOHIDDeviceRef d) {
+    NHDeviceCallback *w = ctx;
+    if (!DeviceAllowed(d)) return;  // the game never saw it
+    if (IsGamepad(d)) HookLog(@"HID gamepad %@ disconnected", KeyForService(IOHIDDeviceGetService(d)));
+    w->cb(w->ctx, r, sender, d);
+}
+
+static void NH_IOHIDManagerRegisterDeviceRemovalCallback(IOHIDManagerRef m, IOHIDDeviceCallback cb, void *ctx) {
+    if (!gAllowedKeys || !cb) { IOHIDManagerRegisterDeviceRemovalCallback(m, cb, ctx); return; }
+    NHDeviceCallback *w = malloc(sizeof *w);
+    w->cb = cb; w->ctx = ctx;
+    IOHIDManagerRegisterDeviceRemovalCallback(m, NH_RemovalTrampoline, w);
 }
 
 static void NH_ValueTrampoline(void *ctx, IOReturn r, void *sender, IOHIDValueRef v) {
@@ -177,8 +258,35 @@ static CFSetRef NH_IOHIDManagerCopyDevices(IOHIDManagerRef m) {
         _interpose_##_replacee __attribute__((section("__DATA,__interpose"))) = {           \
             (const void *)(unsigned long)&_replacement, (const void *)(unsigned long)&_replacee};
 
+#pragma mark - Legacy controller names
+
+// Recent macOS names a PS4 pad "DUALSHOCK 4 Wireless Controller"; older input libraries (InControl, Rewired,
+// Unity's own mappings) only know the names macOS used before, so they ignore the pad. Reporting the old
+// manufacturer and product names makes them pick their PlayStation 4 profile.
+static BOOL gLegacyPadNames;
+
+static BOOL IsDualShock4(IOHIDDeviceRef d) {
+    CFTypeRef vid = IOHIDDeviceGetProperty(d, CFSTR(kIOHIDVendorIDKey));
+    CFTypeRef pid = IOHIDDeviceGetProperty(d, CFSTR(kIOHIDProductIDKey));
+    int v = 0, p = 0;
+    if (!vid || !pid || CFGetTypeID(vid) != CFNumberGetTypeID() || CFGetTypeID(pid) != CFNumberGetTypeID()) return NO;
+    CFNumberGetValue(vid, kCFNumberIntType, &v);
+    CFNumberGetValue(pid, kCFNumberIntType, &p);
+    return v == 0x054c && (p == 0x05c4 || p == 0x09cc || p == 0x0ba0);
+}
+
+static CFTypeRef NH_IOHIDDeviceGetProperty(IOHIDDeviceRef d, CFStringRef key) {
+    if (gLegacyPadNames && key && d && IsDualShock4(d)) {
+        if (CFEqual(key, CFSTR(kIOHIDManufacturerKey))) return CFSTR("Sony Interactive Entertainment");
+        if (CFEqual(key, CFSTR(kIOHIDProductKey))) return CFSTR("Wireless Controller");
+    }
+    return IOHIDDeviceGetProperty(d, key);
+}
+
+DYLD_INTERPOSE(NH_IOHIDDeviceGetProperty, IOHIDDeviceGetProperty)
 DYLD_INTERPOSE(NH_IOHIDManagerRegisterDeviceMatchingCallback, IOHIDManagerRegisterDeviceMatchingCallback)
 DYLD_INTERPOSE(NH_IOHIDManagerRegisterInputValueCallback, IOHIDManagerRegisterInputValueCallback)
+DYLD_INTERPOSE(NH_IOHIDManagerRegisterDeviceRemovalCallback, IOHIDManagerRegisterDeviceRemovalCallback)
 DYLD_INTERPOSE(NH_IOHIDManagerCopyDevices, IOHIDManagerCopyDevices)
 
 #pragma mark - Steam Input filtering
@@ -412,7 +520,25 @@ static BOOL ShouldDrop(NSString *name, id object) {
     return NO;
 }
 
-static IMP gOrigPost, gOrigPostNameObject, gOrigPostNameObjectInfo;
+static IMP gOrigPost, gOrigPostNameObject, gOrigPostNameObjectInfo, gOrigAddObserver, gOrigAddObserverBlock;
+
+// AppKit can deliver focus notifications without the posting methods below, so the game also never gets to
+// subscribe to them (both the selector and the block form).
+static void Hook_addObserver(id self, SEL _cmd, id observer, SEL selector, NSString *name, id object) {
+    if (gForceFocus && name && [gFocusNotifications containsObject:name]) {
+        HookLog(@"focus: not subscribing %@ to %@", NSStringFromClass([observer class]), name);
+        return;
+    }
+    ((void (*)(id, SEL, id, SEL, id, id))gOrigAddObserver)(self, _cmd, observer, selector, name, object);
+}
+
+static id Hook_addObserverBlock(id self, SEL _cmd, NSString *name, id object, NSOperationQueue *queue, id block) {
+    if (gForceFocus && name && [gFocusNotifications containsObject:name]) {
+        HookLog(@"focus: not subscribing a block to %@", name);
+        return [NSObject new];  // a token the caller may pass to removeObserver:
+    }
+    return ((id (*)(id, SEL, id, id, id, id))gOrigAddObserverBlock)(self, _cmd, name, object, queue, block);
+}
 
 static void Hook_post(id self, SEL _cmd, NSNotification *n) {
     if (ShouldDrop(n.name, n.object)) return;
@@ -476,6 +602,10 @@ static void InstallHooks(void) {
     gOrigPost = SwizzleInstance(nc, @selector(postNotification:), (IMP)Hook_post);
     gOrigPostNameObject = SwizzleInstance(nc, @selector(postNotificationName:object:), (IMP)Hook_postNameObject);
     gOrigPostNameObjectInfo = SwizzleInstance(nc, @selector(postNotificationName:object:userInfo:), (IMP)Hook_postNameObjectInfo);
+    if (gForceFocus) {
+        gOrigAddObserver = SwizzleInstance(nc, @selector(addObserver:selector:name:object:), (IMP)Hook_addObserver);
+        gOrigAddObserverBlock = SwizzleInstance(nc, @selector(addObserverForName:object:queue:usingBlock:), (IMP)Hook_addObserverBlock);
+    }
 
     if (gAllowedKeys) {
         gOrigControllers = SwizzleClass([GCController class], @selector(controllers), (IMP)Hook_controllers);
@@ -531,12 +661,82 @@ static void EnforceFrame(void) {
     }
 }
 
+#pragma mark - Focus for engines with their own delegates
+
+// Engines like Unity track focus in their app and window delegates (applicationDidResignActive:,
+// windowDidResignKey:), which AppKit can call without going through the notification methods filtered above.
+// Unity then reports OnApplicationFocus(false) and input libraries such as InControl drop all controller input.
+// So those delegate methods become no-ops, and the game is told once that it is active and key.
+static void Hook_ignoreResign(id self, SEL _cmd, id notification) {}
+
+static BOOL NeutralizeResign(id delegate, NSArray<NSString *> *selectors) {
+    if (!delegate) return NO;
+    BOOL any = NO;
+    for (NSString *name in selectors) {
+        SEL sel = NSSelectorFromString(name);
+        Method m = class_getInstanceMethod([delegate class], sel);
+        if (!m || method_getImplementation(m) == (IMP)Hook_ignoreResign) continue;
+        class_replaceMethod([delegate class], sel, (IMP)Hook_ignoreResign, method_getTypeEncoding(m));
+        HookLog(@"focus: ignoring -[%@ %@]", NSStringFromClass([delegate class]), name);
+        any = YES;
+    }
+    return any;
+}
+
+/// Every class in the game's own executable that tracks focus through these methods (as an app or window
+/// delegate, or as a notification observer).
+static void NeutralizeEngineFocusClasses(void) {
+    const char *image = class_getImageName([NSApp.delegate class] ?: [NSObject class]);
+    NSString *mainImage = NSBundle.mainBundle.executablePath;
+    unsigned int count = 0;
+    Class *classes = objc_copyClassList(&count);
+    NSArray *selectors = @[ @"applicationWillResignActive:", @"applicationDidResignActive:", @"windowDidResignKey:",
+                            @"windowDidResignMain:" ];
+    for (unsigned int i = 0; i < count; i++) {
+        const char *img = class_getImageName(classes[i]);
+        if (!img) continue;
+        BOOL gameClass = (image && strcmp(img, image) == 0) || (mainImage && strcmp(img, mainImage.fileSystemRepresentation) == 0);
+        if (!gameClass) continue;
+        for (NSString *name in selectors) {
+            SEL sel = NSSelectorFromString(name);
+            Method m = class_getInstanceMethod(classes[i], sel);
+            // Only methods the class implements itself, not ones inherited from AppKit.
+            unsigned int n = 0;
+            Method *own = class_copyMethodList(classes[i], &n);
+            BOOL defined = NO;
+            for (unsigned int j = 0; j < n; j++) if (method_getName(own[j]) == sel) defined = YES;
+            free(own);
+            if (!m || !defined || method_getImplementation(m) == (IMP)Hook_ignoreResign) continue;
+            method_setImplementation(m, (IMP)Hook_ignoreResign);
+            HookLog(@"focus: ignoring -[%s %@]", class_getName(classes[i]), name);
+        }
+    }
+    free(classes);
+}
+
+static void KeepDelegateFocus(void) {
+    static BOOL done;
+    NSWindow *w = GameWindow();
+    if (done || !w) return;
+    done = YES;
+    NeutralizeEngineFocusClasses();
+    NeutralizeResign(NSApp.delegate, @[ @"applicationWillResignActive:", @"applicationDidResignActive:" ]);
+    NeutralizeResign(w.delegate, @[ @"windowDidResignKey:", @"windowDidResignMain:" ]);
+    // A window started behind another app never became key: tell the engine it is.
+    [[NSNotificationCenter defaultCenter] postNotificationName:NSWindowDidBecomeKeyNotification object:w];
+    [[NSNotificationCenter defaultCenter] postNotificationName:NSWindowDidBecomeMainNotification object:w];
+    [[NSNotificationCenter defaultCenter] postNotificationName:NSApplicationDidBecomeActiveNotification object:NSApp];
+}
+
 static dispatch_source_t gFrameTimer;
 
 static void StartFrameTimer(void) {
     gFrameTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
     dispatch_source_set_timer(gFrameTimer, dispatch_time(DISPATCH_TIME_NOW, 0), 500 * NSEC_PER_MSEC, 50 * NSEC_PER_MSEC);
-    dispatch_source_set_event_handler(gFrameTimer, ^{ EnforceFrame(); });
+    dispatch_source_set_event_handler(gFrameTimer, ^{
+        if (gHaveFrame) EnforceFrame();
+        if (gForceFocus) KeepDelegateFocus();
+    });
     dispatch_resume(gFrameTimer);
 }
 
@@ -566,11 +766,18 @@ __attribute__((constructor)) static void SofaSplitHookInit(void) {
             if (kv.count == 2) tokens[kv[0].lowercaseString] = [kv[1] componentsSeparatedByString:@","];
         }
         gDeviceTokens = tokens;
+        NSMutableSet *addresses = [NSMutableSet set];
+        for (NSString *key in gAllowedKeys)
+            for (NSString *token in tokens[key.lowercaseString])
+                if (token.length == 12) [addresses addObject:token];
+        gAllowedAddresses = addresses;
 
         gSteamInputFilter = gAllowedKeys != nil;
         gPlayer = env[@"SOFASPLIT_PLAYER"].intValue;
         gForceFocus = [env[@"SOFASPLIT_FORCE_FOCUS"] isEqualToString:@"1"];
         gBorderless = [env[@"SOFASPLIT_BORDERLESS"] isEqualToString:@"1"];
+        gLegacyPadNames = [env[@"SOFASPLIT_LEGACY_PAD_NAMES"] isEqualToString:@"1"];
+        SofaSplitDS4Init([env[@"SOFASPLIT_DS4_BLUETOOTH"] isEqualToString:@"1"]);
         NSArray<NSString *> *f = [env[@"SOFASPLIT_WINDOW_FRAME"] componentsSeparatedByString:@","];
         if (f.count == 4) {
             gFrame = NSMakeRect(f[0].doubleValue, f[1].doubleValue, f[2].doubleValue, f[3].doubleValue);
@@ -604,7 +811,7 @@ __attribute__((constructor)) static void SofaSplitHookInit(void) {
 
         dispatch_async(dispatch_get_main_queue(), ^{
             if (@available(macOS 11.3, *)) GCController.shouldMonitorBackgroundEvents = YES;
-            if (gHaveFrame) StartFrameTimer();
+            if (gHaveFrame || gForceFocus) StartFrameTimer();
         });
     }
 }

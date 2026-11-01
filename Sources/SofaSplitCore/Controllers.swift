@@ -14,6 +14,38 @@ public struct InputDevice: Identifiable, Hashable, Codable {
     static func normalize(_ s: String) -> String {
         String(s.lowercased().filter { $0.isHexDigit })
     }
+
+    /// The controller's Bluetooth address (12 hex digits) when known: the same physical pad over USB and over
+    /// Bluetooth shares it, while its key changes with the connection.
+    public var hardwareAddress: String? { tokens.first { $0.count == 12 } }
+}
+
+public enum ControllerIdentity {
+    /// The Bluetooth address of a controller, over either connection. Over Bluetooth it is the serial number;
+    /// PlayStation pads on USB report it in a feature report (DUALSHOCK 4: 0x12, DualSense: 0x09, bytes 1-6
+    /// in reverse order). Must stay in sync with HardwareAddress() in Hook/SofaSplitHook.m.
+    public static func hardwareAddress(of device: IOHIDDevice) -> String? {
+        if let serial = IOHIDDeviceGetProperty(device, kIOHIDSerialNumberKey as CFString) as? String {
+            let hex = InputDevice.normalize(serial)
+            if hex.count == 12 { return hex }
+        }
+        let vid = (IOHIDDeviceGetProperty(device, kIOHIDVendorIDKey as CFString) as? Int) ?? 0
+        let pid = (IOHIDDeviceGetProperty(device, kIOHIDProductIDKey as CFString) as? Int) ?? 0
+        guard vid == 0x054c else { return nil }
+        let report: (id: UInt8, length: Int)
+        switch pid {
+        case 0x05c4, 0x09cc: report = (0x12, 16)
+        case 0x0ce6, 0x0df2: report = (0x09, 20)
+        default: return nil
+        }
+        var buffer = [UInt8](repeating: 0, count: report.length)
+        buffer[0] = report.id
+        var length = CFIndex(report.length)
+        guard IOHIDDeviceGetReport(device, kIOHIDReportTypeFeature, CFIndex(report.id), &buffer, &length) == kIOReturnSuccess,
+              length >= 7 else { return nil }
+        let address = buffer[1...6].reversed().map { String(format: "%02x", $0) }.joined()
+        return address == "000000000000" ? nil : address
+    }
 }
 
 public enum DeviceKey {
@@ -80,6 +112,13 @@ public final class ControllerMonitor: ObservableObject {
         IOHIDManagerRegisterInputValueCallback(manager, { ctx, _, _, value in
             Unmanaged<ControllerMonitor>.fromOpaque(ctx!).takeUnretainedValue().input(value)
         }, ctx)
+        // A DUALSHOCK 4 on Bluetooth sends only its extended report (0x11), never button values.
+        IOHIDManagerRegisterInputReportCallback(manager, { ctx, _, sender, _, reportID, report, length in
+            guard reportID == 0x11, length >= 10, let sender else { return }
+            let device = Unmanaged<IOHIDDevice>.fromOpaque(sender).takeUnretainedValue()
+            Unmanaged<ControllerMonitor>.fromOpaque(ctx!).takeUnretainedValue()
+                .bluetoothReport(device, buttons: [report[7] & 0xF0, report[8], report[9] & 0x03])
+        }, ctx)
         if scheduleOnMainRunLoop {
             IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
         }
@@ -102,9 +141,10 @@ public final class ControllerMonitor: ObservableObject {
         let product = IOHIDDeviceGetProperty(device, kIOHIDProductKey as CFString) as? String
         let maker = IOHIDDeviceGetProperty(device, kIOHIDManufacturerKey as CFString) as? String
         var tokens: [String] = []
+        if let address = ControllerIdentity.hardwareAddress(of: device) { tokens.append(address) }
         if let serial = IOHIDDeviceGetProperty(device, kIOHIDSerialNumberKey as CFString) as? String {
             let t = InputDevice.normalize(serial)
-            if t.count >= 6 { tokens.append(t) }
+            if t.count >= 6 && !tokens.contains(t) { tokens.append(t) }
         }
         if let loc = key.split(separator: ":").last, !loc.hasPrefix("r") { tokens.append(String(loc)) }
         tokens.append(String(format: "%llx", rid))
@@ -120,6 +160,7 @@ public final class ControllerMonitor: ObservableObject {
 
     private func removed(_ device: IOHIDDevice) {
         known.removeValue(forKey: Unmanaged.passUnretained(device).toOpaque())
+        lastButtons.removeValue(forKey: Unmanaged.passUnretained(device).toOpaque())
         publish()
     }
 
@@ -129,6 +170,16 @@ public final class ControllerMonitor: ObservableObject {
               IOHIDValueGetIntegerValue(value) == 1 else { return }
         let device = IOHIDElementGetDevice(element)
         if let info = known[Unmanaged.passUnretained(device).toOpaque()] { onButtonPress?(info) }
+    }
+
+    private var lastButtons: [UnsafeMutableRawPointer: [UInt8]] = [:]
+
+    private func bluetoothReport(_ device: IOHIDDevice, buttons: [UInt8]) {
+        let ptr = Unmanaged.passUnretained(device).toOpaque()
+        let before = lastButtons[ptr] ?? [0, 0, 0]
+        lastButtons[ptr] = buttons
+        let newlyPressed = zip(buttons, before).contains { now, was in now & ~was != 0 }
+        if newlyPressed, let info = known[ptr] { onButtonPress?(info) }
     }
 
     private func publish() {

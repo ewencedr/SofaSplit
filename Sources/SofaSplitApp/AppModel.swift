@@ -122,8 +122,20 @@ final class AppModel: ObservableObject {
         for id in allSlotIDs where !queue.isEmpty { assignments[id] = queue.removeFirst() }
     }
 
+    /// Hardware address of every pad seen, by key: a pad that switches between cable and Bluetooth gets a new key.
+    private var addresses: [String: String] = [:]
+
     private func dropDisconnected(_ devices: [InputDevice]) {
+        for d in devices { if let a = d.hardwareAddress { addresses[d.id] = a } }
         let keys = Set(devices.map(\.id))
+        for (slot, assignment) in assignments {
+            guard case .gamepad(let k) = assignment, !keys.contains(k) else { continue }
+            // Same controller, other connection: it keeps its player.
+            if let address = addresses[k], let same = devices.first(where: { $0.hardwareAddress == address }) {
+                assignments[slot] = .gamepad(same.id)
+                log("\(same.name) reconnected (cable ↔ Bluetooth) and stays player \(playerNumber(for: slot) ?? 0)")
+            }
+        }
         assignments = assignments.filter {
             if case .gamepad(let k) = $0.value { return keys.contains(k) }
             return true

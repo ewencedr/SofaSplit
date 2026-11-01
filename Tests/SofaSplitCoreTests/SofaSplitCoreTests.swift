@@ -255,6 +255,15 @@ import Testing
         #expect(roundTrip == [current])
     }
 
+    @Test func hardwareAddressIsTheTwelveDigitToken() {
+        let bluetooth = InputDevice(id: "054c:09cc:49dafadf", name: "DUALSHOCK 4", registryID: 0x1001d0edd,
+                                    tokens: ["101849dafadf", "49dafadf", "1001d0edd"])
+        let usb = InputDevice(id: "054c:09cc:00132000", name: "Wireless Controller", registryID: 0x1001d517a,
+                              tokens: ["101849dafadf", "00132000", "1001d517a"])
+        #expect(bluetooth.hardwareAddress == "101849dafadf" && bluetooth.hardwareAddress == usb.hardwareAddress)
+        #expect(InputDevice(id: "x", name: "y", registryID: 1, tokens: ["49dafadf"]).hardwareAddress == nil)
+    }
+
     @Test func readsValveKeyValues() {
         let vdf = #"""
         "AppState"

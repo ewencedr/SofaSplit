@@ -37,7 +37,12 @@ switch command {
 case "controllers":
     let monitor = ControllerMonitor(scheduleOnMainRunLoop: false)
     if monitor.devices.isEmpty { print("No gamepads detected.") }
-    for (i, d) in monitor.devices.enumerated() { print("\(i)  \(d.id)  \(d.name)") }
+    for (i, d) in monitor.devices.enumerated() {
+        let address = d.hardwareAddress.map { a in
+            "  [" + stride(from: 0, to: 12, by: 2).map { String(Array(a)[$0..<$0 + 2]) }.joined(separator: ":") + "]"
+        } ?? ""
+        print("\(i)  \(d.id)  \(d.name)\(address)")
+    }
 
 case "analyze":
     guard let target = args.first else { fail("usage: sofasplit analyze <Game.app>") }

@@ -16,7 +16,7 @@ echo "==> Hook library (universal: arm64 + x86_64, also for Rosetta games)"
 clang -arch arm64 -arch x86_64 -mmacosx-version-min=11.0 -O2 -dynamiclib -fobjc-arc \
   -framework AppKit -framework GameController -framework IOKit \
   -install_name @rpath/libSofaSplitHook.dylib \
-  -o "$BUILD/libSofaSplitHook.dylib" Hook/SofaSplitHook.m Hook/SteamLobbyEmu.m
+  -o "$BUILD/libSofaSplitHook.dylib" Hook/SofaSplitHook.m Hook/SteamLobbyEmu.m Hook/DualShock4Bluetooth.m
 codesign --force --sign - "$BUILD/libSofaSplitHook.dylib"
 
 echo "==> Swift app + CLI"
@@ -34,6 +34,7 @@ cp "$BIN/SofaSplitApp" "$APP/Contents/MacOS/SofaSplitApp"
 cp "$BIN/sofasplit" "$APP/Contents/MacOS/sofasplit"
 cp "$BUILD/libSofaSplitHook.dylib" "$APP/Contents/Resources/"
 cp Handlers/*.js "$APP/Contents/Resources/Handlers/"
+cp Resources/AppIcon.icns "$APP/Contents/Resources/"  # drawn by scripts/make-icon.swift
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -42,6 +43,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleDisplayName</key><string>SofaSplit</string>
   <key>CFBundleIdentifier</key><string>io.github.ewencedr.sofasplit</string>
   <key>CFBundleExecutable</key><string>SofaSplitApp</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$VERSION</string>

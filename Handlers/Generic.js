@@ -19,7 +19,8 @@ Game.Play = function (Context) {
   // Unity is the most common engine on macOS. It takes the window size from these arguments and from its
   // saved preferences; other games ignore both.
   Context.StartArguments += " -screen-fullscreen 0 -screen-width " + Context.PixelWidth +
-                            " -screen-height " + Context.PixelHeight;
+                            " -screen-height " + Context.PixelHeight +
+                            " -logFile '" + Context.InstanceRoot + "/Player.log'";  // own log per player
   Context.SetDefault("Screenmanager Fullscreen mode", 3);  // windowed
   Context.SetDefault("Screenmanager Resolution Use Native", 0);
   Context.SetDefault("Screenmanager Resolution Width", Context.PixelWidth);

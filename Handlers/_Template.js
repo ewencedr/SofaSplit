@@ -32,9 +32,14 @@ Game.Hook.GamepadRouting = true;      // Each instance only sees the gamepad ass
 Game.Hook.SteamInput = false;         // Game reads pads via Steam Input: route Steam controller handles, hide raw HID pads.
                                       // Each routed pad lights up in its player colour (P1 blue, P2 green, P3 yellow, P4 pink).
 Game.Hook.SteamMultiplayer = false;   // Steam lobby/P2P games: give each instance its own Steam identity and run
-                                      // lobbies + ISteamNetworkingMessages locally between the instances (real Steam
-                                      // still handles login, DLC, Steam Input, achievements).
+                                      // lobbies, the lobby list, ISteamNetworkingMessages and legacy ISteamNetworking
+                                      // P2P locally between the instances (real Steam still handles login, DLC,
+                                      // Steam Input, achievements).
 Game.Hook.ForceFocus = true;          // Instances keep running/reading input while in the background.
+Game.Hook.PlayStationBluetooth = true; // Decode Bluetooth DUALSHOCK 4 input for games that read HID elements (Unity's
+                                      // old input system), which otherwise see the pad but never get a button press.
+Game.Hook.LegacyControllerNames = false; // Report a DUALSHOCK 4 by its pre-2020 macOS name, for input libraries
+                                      // (old InControl) that only know that name.
 Game.Hook.Borderless = true;          // Remove the title bar from the game window.
 Game.Hook.WindowPositioning = "auto"; // "auto" (hook, or Accessibility when not injected) | "hook" | "accessibility" | "none"
 

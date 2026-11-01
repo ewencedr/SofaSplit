@@ -25,7 +25,8 @@ Game.Hook.Borderless = true;
 
 Game.Play = function (Context) {
   Context.StartArguments = "-screen-fullscreen 0 -screen-width " + Context.PixelWidth +
-                           " -screen-height " + Context.PixelHeight;
+                           " -screen-height " + Context.PixelHeight +
+                           " -logFile '" + Context.InstanceRoot + "/Player.log'";  // own log per player
   // Unity also reads its window mode from PlayerPrefs; force windowed for this clone.
   Context.SetDefault("Screenmanager Fullscreen mode", 3);
   Context.SetDefault("Screenmanager Resolution Use Native", 0);

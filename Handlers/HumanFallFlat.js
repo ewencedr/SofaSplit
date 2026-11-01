@@ -15,11 +15,13 @@ Game.Hook.Inject = true;
 Game.Hook.GamepadRouting = true;
 Game.Hook.SteamMultiplayer = true;  // own Steam identity per window; the lobby list shows the other windows' games
 Game.Hook.ForceFocus = true;
+Game.Hook.LegacyControllerNames = true;  // its InControl doesn't know "DUALSHOCK 4 Wireless Controller"
 Game.Hook.Borderless = true;
 
 Game.Play = function (Context) {
   Context.StartArguments = "-screen-fullscreen 0 -screen-width " + Context.PixelWidth +
-                           " -screen-height " + Context.PixelHeight;
+                           " -screen-height " + Context.PixelHeight +
+                           " -logFile '" + Context.InstanceRoot + "/Player.log'";  // own log per player
   Context.SetDefault("Screenmanager Is Fullscreen mode", 0);  // Unity 2017 key
   Context.SetDefault("Screenmanager Fullscreen mode", 3);
   Context.SetDefault("Screenmanager Resolution Width", Context.PixelWidth);

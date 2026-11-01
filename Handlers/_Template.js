@@ -27,6 +27,7 @@ Game.CopyFiles = [];              // ["files/steam_api.dylib -> Contents/Framewo
 Game.DeleteFiles = [];            // ["Contents/Resources/intro.mov"] relative to the clone.
 
 // ---- Hooks (libSofaSplitHook.dylib, injected with DYLD_INSERT_LIBRARIES) -----
+Game.DefaultLayout = "";              // Layout picked when the game is selected, e.g. "shared" for local co-op games
 Game.Hook.Inject = true;              // Master switch. Mac App Store (FairPlay-encrypted) games must use false.
 Game.Hook.GamepadRouting = true;      // Each instance only sees the gamepad assigned to it.
 Game.Hook.SteamInput = false;         // Game reads pads via Steam Input: route Steam controller handles, hide raw HID pads.
@@ -40,6 +41,9 @@ Game.Hook.PlayStationBluetooth = true; // Decode Bluetooth DUALSHOCK 4 input for
                                       // old input system), which otherwise see the pad but never get a button press.
 Game.Hook.LegacyControllerNames = false; // Report a DUALSHOCK 4 by its pre-2020 macOS name, for input libraries
                                       // (old InControl) that only know that name.
+Game.Hook.ControllerLayout = "";      // "xbox360": number a DUALSHOCK 4's buttons like an Xbox 360 controller under
+                                      // the old macOS driver (A = 16, B = 17, X = 18, Y = 19, Start = 9, d-pad 5-8),
+                                      // for games that hard-code that layout.
 Game.Hook.Borderless = true;          // Remove the title bar from the game window.
 Game.Hook.WindowPositioning = "auto"; // "auto" (hook, or Accessibility when not injected) | "hook" | "accessibility" | "none"
 

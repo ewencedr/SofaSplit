@@ -213,6 +213,7 @@ public final class GameSession: ObservableObject {
             if handler.bool("Hook.ForceFocus", default: true) { env["SOFASPLIT_FORCE_FOCUS"] = "1" }
             if handler.bool("Hook.LegacyControllerNames", default: false) { env["SOFASPLIT_LEGACY_PAD_NAMES"] = "1" }
             if handler.bool("Hook.PlayStationBluetooth", default: true) { env["SOFASPLIT_DS4_BLUETOOTH"] = "1" }
+            if let layout = handler.string("Hook.ControllerLayout") { env["SOFASPLIT_PAD_LAYOUT"] = layout }
             if useHookFrame {
                 let f = slot.frame
                 env["SOFASPLIT_WINDOW_FRAME"] = "\(f.minX),\(f.minY),\(f.width),\(f.height)"

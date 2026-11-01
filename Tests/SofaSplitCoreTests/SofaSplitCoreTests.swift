@@ -114,6 +114,27 @@ import Testing
                               bundleIdentifier: nil, startArguments: "", environment: [:], assignment: .none)
         #expect(throws: HandlerError.self) { try h.runPlay(ctx) }
     }
+
+    /// Every handler that ships with the app loads and runs its Play function without script errors.
+    @Test func bundledHandlersLoadAndPlay() throws {
+        let dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../Handlers").standardized
+        let files = try FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "js" }
+        #expect(files.count >= 5)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("sofasplit-tests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        for file in files {
+            let h = try GameHandler(url: file)
+            #expect(!h.gameName.isEmpty, "\(file.lastPathComponent)")
+            if let layout = h.string("DefaultLayout"), !layout.isEmpty {
+                #expect(LayoutKind(rawValue: layout) != nil, "\(file.lastPathComponent): unknown DefaultLayout \(layout)")
+            }
+            let ctx = PlayContext(playerIndex: 0, playerCount: 2, frame: CGRect(x: 0, y: 0, width: 800, height: 600), scale: 2,
+                                  instanceRoot: root, appURL: nil, homeURL: root, bundleIdentifier: "test",
+                                  startArguments: "", environment: [:], assignment: .none)
+            _ = try h.runPlay(ctx)
+        }
+    }
 }
 
 @Suite struct AnalyzerTests {

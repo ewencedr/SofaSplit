@@ -17,6 +17,7 @@
 //   SOFASPLIT_BORDERLESS        "1"
 //   SOFASPLIT_LEGACY_PAD_NAMES  "1"  report PlayStation 4 pads by the name older macOS gave them
 //   SOFASPLIT_DS4_BLUETOOTH     "1"  decode Bluetooth DUALSHOCK 4 reports for HID-element readers (DualShock4Bluetooth.m)
+//   SOFASPLIT_PAD_LAYOUT        "xbox360"  number those pads' buttons like an Xbox 360 controller on macOS
 //   SOFASPLIT_HOOK_LOG          path of a log file (default stderr)
 
 #import <AppKit/AppKit.h>
@@ -51,7 +52,7 @@ void SofaSplitHookLog(NSString *fmt, ...) {
 #define HookLog SofaSplitHookLog
 
 // DualShock4Bluetooth.m
-void SofaSplitDS4Init(BOOL enabled);
+void SofaSplitDS4Init(BOOL enabled, NSString *layout);
 
 // SteamLobbyEmu.m
 void SofaSplitSteamEmuInit(NSDictionary<NSString *, NSString *> *env);
@@ -777,7 +778,7 @@ __attribute__((constructor)) static void SofaSplitHookInit(void) {
         gForceFocus = [env[@"SOFASPLIT_FORCE_FOCUS"] isEqualToString:@"1"];
         gBorderless = [env[@"SOFASPLIT_BORDERLESS"] isEqualToString:@"1"];
         gLegacyPadNames = [env[@"SOFASPLIT_LEGACY_PAD_NAMES"] isEqualToString:@"1"];
-        SofaSplitDS4Init([env[@"SOFASPLIT_DS4_BLUETOOTH"] isEqualToString:@"1"]);
+        SofaSplitDS4Init([env[@"SOFASPLIT_DS4_BLUETOOTH"] isEqualToString:@"1"], env[@"SOFASPLIT_PAD_LAYOUT"]);
         NSArray<NSString *> *f = [env[@"SOFASPLIT_WINDOW_FRAME"] componentsSeparatedByString:@","];
         if (f.count == 4) {
             gFrame = NSMakeRect(f[0].doubleValue, f[1].doubleValue, f[2].doubleValue, f[3].doubleValue);

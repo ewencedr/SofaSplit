@@ -21,7 +21,7 @@ final class AppModel: ObservableObject {
     let controllers = ControllerMonitor()
     let session = GameSession()
 
-    @Published var selectedGameID: GameEntry.ID?
+    @Published var selectedGameID: GameEntry.ID? { didSet { applyDefaultLayout() } }
     @Published var screens: [ScreenInfo] = []
     @Published var layouts: [Int: LayoutKind] = [0: .sideBySide]
     @Published var assignments: [SlotID: Assignment] = [:]
@@ -61,6 +61,7 @@ final class AppModel: ObservableObject {
         selectedGameID = library.games.first?.id
         // Games added by older versions haven't been analyzed yet.
         for game in library.games where game.profile == nil { reanalyze(game) }
+        adoptNewHandlers()
     }
 
     var selectedGame: GameEntry? { library.games.first { $0.id == selectedGameID } }
@@ -190,6 +191,32 @@ final class AppModel: ObservableObject {
                 self.library.games.append(entry)
                 self.selectedGameID = entry.id
             }
+        }
+    }
+
+    /// A game added with the generic handler switches to a dedicated one when an update ships it. Its settings were
+    /// suggestions for the generic handler, so they're dropped: the dedicated handler knows better.
+    /// A handler can name the layout its game plays best with (Game.DefaultLayout, e.g. "shared").
+    /// The user's layouts from before a game's default replaced them, restored for games without one.
+    private var layoutsBeforeDefault: [Int: LayoutKind]?
+
+    private func applyDefaultLayout() {
+        let wanted = selectedGame.flatMap { handler(for: $0) }?.string("DefaultLayout").flatMap(LayoutKind.init(rawValue:))
+        if let kind = wanted, !screens.isEmpty {
+            if layoutsBeforeDefault == nil { layoutsBeforeDefault = layouts }
+            if layout(for: 0) != kind { setLayout(kind, for: 0) }
+        } else if let saved = layoutsBeforeDefault {
+            layoutsBeforeDefault = nil
+            layouts = saved
+        }
+    }
+
+    private func adoptNewHandlers() {
+        for (i, game) in library.games.enumerated() where game.handlerFile == "Generic.js" {
+            guard let handler = HandlerStore.bestMatch(for: game.appURL), !handler.isGeneric else { continue }
+            library.games[i].handlerFile = handler.url.lastPathComponent
+            library.games[i].options = nil
+            log("\(game.name) now uses its own handler, \(handler.url.lastPathComponent)")
         }
     }
 

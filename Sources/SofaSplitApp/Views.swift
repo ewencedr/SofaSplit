@@ -89,7 +89,9 @@ struct GameRow: View {
             Image(nsImage: NSWorkspace.shared.icon(forFile: game.appPath)).resizable().frame(width: 24, height: 24)
             VStack(alignment: .leading) {
                 Text(game.name).lineLimit(1)
-                if let verdict = game.profile?.assessment.verdict {
+                if game.handlerFile != "Generic.js" {
+                    Text("Supported").font(.caption).foregroundStyle(.green).lineLimit(1)
+                } else if let verdict = game.profile?.assessment.verdict {
                     Text(verdict.label).font(.caption).foregroundStyle(verdict.color).lineLimit(1)
                 }
             }
@@ -244,7 +246,7 @@ struct ScreenPanel: View {
                     ForEach(LayoutKind.allCases) { Text($0.title).tag($0) }
                 }
                 .frame(maxWidth: 320)
-                preview
+                if model.layout(for: screen.id) != .disabled { preview }
             }
             .padding(6)
         } label: {
@@ -388,7 +390,15 @@ struct CompatibilityBox: View {
 
     var body: some View {
         GroupBox {
-            if let profile = game.profile {
+            if game.handlerFile != "Generic.js" {
+                // A handler made for this game beats the analyzer's guess.
+                HStack {
+                    Label("Supported", systemImage: "checkmark.seal.fill").font(.headline).foregroundStyle(.green)
+                    Text("SofaSplit has settings made for this game.").foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(4)
+            } else if let profile = game.profile {
                 let (verdict, reasons) = profile.assessment
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {

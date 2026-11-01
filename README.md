@@ -57,6 +57,7 @@ Not supported: Mac App Store games (they're encrypted) and games with anti-cheat
 |---|---|---|
 | Escape Simulator 2 | ✅ Works | Host in Player 1, join with the lobby code. Has its own optimized settings |
 | Human Fall Flat | ✅ Works | Player 1: Play → Online → Host. Others: Play → Online, pick Player 1's game. PS4 controllers on Bluetooth work too, which the game can't read on its own on current macOS |
+| Monster Prom | ✅ Works | Local co-op: use the **Shared screen** layout. Makes PS4 controllers work (on Bluetooth or cable), which the game doesn't support on its own on current macOS |
 | Golf With Your Friends | ❌ Doesn't work | Its online service (Photon) checks the Steam account and refuses the same account twice |
 
 Tried a game? Please [report it](https://github.com/ewencedr/SofaSplit/issues/new?template=game-report.md),
@@ -100,6 +101,7 @@ Releases are built by GitHub Actions: pushing a tag like `v0.2.0` publishes `Sof
 | A game only runs once | Each player gets an APFS clone of the `.app` (no extra disk space) with its own bundle ID, launched directly |
 | Every window reacts to every controller | `libSofaSplitHook.dylib`, injected with `DYLD_INSERT_LIBRARIES`, hides all but the assigned pad from IOKit HID, GameController and Steam Input. Pads are recognised by their Bluetooth address, so cable ↔ Bluetooth switches keep the player |
 | Older games ignore PS4 controllers on Bluetooth | macOS puts a Bluetooth DUALSHOCK 4 into its extended report mode, which games reading HID elements (Unity's old input) can't parse. The hook decodes report 0x11 and feeds them normal button and axis values |
+| Games hard-code the old Mac Xbox 360 button numbers | With `Hook.ControllerLayout = "xbox360"`, a DUALSHOCK 4 is presented with that numbering (A = button 16 …): 20 of its constant padding elements stand in as buttons |
 | Background windows pause | The hook keeps the app "active", hides focus-loss notifications and the engine's own resign handlers (Unity stops reading controllers otherwise), enables background controller events and disables App Nap |
 | Windows need tiling | The hook places each window in its slot, borderless, and blocks native fullscreen (Accessibility API as fallback) |
 | Copies on one Steam account can't join each other | The hook gives each copy its own Steam ID (from the unused "web instance" range) and runs Steam lobbies, the lobby list, `ISteamNetworkingMessages` and the older `ISteamNetworking` P2P API locally between the copies over Unix sockets, for both current and older Steamworks.NET. Login, ownership, DLC, achievements and cloud saves still go through the real Steam client |

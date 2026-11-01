@@ -33,7 +33,11 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/Handlers"
 cp "$BIN/SofaSplitApp" "$APP/Contents/MacOS/SofaSplitApp"
 cp "$BIN/sofasplit" "$APP/Contents/MacOS/sofasplit"
 cp "$BUILD/libSofaSplitHook.dylib" "$APP/Contents/Resources/"
-cp Handlers/*.js "$APP/Contents/Resources/Handlers/"
+for h in Handlers/*.js; do
+  # TestGame.js drives the diagnostic TestGame.app: only for development builds.
+  if [ "$(basename "$h")" = TestGame.js ] && [ "${NO_TESTGAME:-0}" = 1 ]; then continue; fi
+  cp "$h" "$APP/Contents/Resources/Handlers/"
+done
 cp Resources/AppIcon.icns "$APP/Contents/Resources/"  # drawn by scripts/make-icon.swift
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

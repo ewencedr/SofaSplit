@@ -284,10 +284,11 @@ final class AppModel: ObservableObject {
             guard let text = try? String(contentsOf: url, encoding: .utf8) else { return "(none)" }
             return text.split(separator: "\n", omittingEmptySubsequences: false).suffix(n).joined(separator: "\n")
         }
+        func orNone(_ items: [String]) -> String { items.isEmpty ? "none" : items.joined(separator: ", ") }
         let info = Bundle.main.infoDictionary
         var out = ["SofaSplit \(info?["CFBundleShortVersionString"] as? String ?? "dev")",
                    "macOS \(ProcessInfo.processInfo.operatingSystemVersionString)",
-                   "Gamepads: \(controllers.devices.map { "\($0.name) [\($0.id)]" }.joined(separator: ", "))"]
+                   "Gamepads: " + orNone(controllers.devices.map { "\($0.name) [\($0.id)]" })]
         if let game = selectedGame {
             out.append("Game: \(game.name) (\(game.appURL.lastPathComponent)), handler \(game.handlerFile)")
             if let p = game.profile {
@@ -296,7 +297,7 @@ final class AppModel: ObservableObject {
                            + "api=\(p.usesSteam) flat=\(p.steamViaFlatAPI) lobbies=\(p.steamLobbies) messages=\(p.steamMessages) "
                            + "sockets=\(p.steamSockets) legacyP2P=\(p.steamLegacyP2P) input=\(p.steamInput)")
             }
-            out.append("Settings: \((game.options ?? [:]).sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: ", "))")
+            out.append("Changed settings: " + orNone((game.options ?? [:]).sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }))
             if let h = handler(for: game) {
                 let dir = Paths.content.appendingPathComponent(h.guid)
                 let instances = ((try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? [])

@@ -201,22 +201,22 @@ struct DevicesPanel: View {
                         .font(.callout).foregroundStyle(.secondary)
                 }
                 ForEach(model.controllers.devices) { d in
-                    row(icon: "gamecontroller.fill", name: d.name, detail: d.id, assignment: .gamepad(d.id))
+                    row(icon: "gamecontroller.fill", name: d.name, detail: d.id, monospaced: true, assignment: .gamepad(d.id))
                 }
-                row(icon: "keyboard", name: "Keyboard & Mouse", detail: "Goes to the focused window", assignment: .keyboardMouse)
+                row(icon: "keyboard", name: "Keyboard & Mouse", detail: "Goes to the focused window", monospaced: false, assignment: .keyboardMouse)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(6)
         }
     }
 
-    func row(icon: String, name: String, detail: String, assignment: Assignment) -> some View {
+    func row(icon: String, name: String, detail: String, monospaced: Bool, assignment: Assignment) -> some View {
         let slot = model.slotHolding(assignment)
         return HStack {
             Image(systemName: icon).frame(width: 22)
             VStack(alignment: .leading) {
                 Text(name).lineLimit(1)
-                Text(detail).font(.caption2.monospaced()).foregroundStyle(.secondary).lineLimit(1)
+                Text(detail).font(monospaced ? .caption2.monospaced() : .caption).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer()
             if let slot, let p = model.playerNumber(for: slot) {
@@ -243,7 +243,8 @@ struct ScreenPanel: View {
             }
             .padding(6)
         } label: {
-            Text("Screen \(screen.id + 1) — \(screen.name)  \(Int(screen.frame.width))×\(Int(screen.frame.height))")
+            // String(...) so the size isn't formatted with a thousands separator ("1.728×1.117").
+            Text("Screen \(screen.id + 1) — \(screen.name)  " + String(Int(screen.frame.width)) + "×" + String(Int(screen.frame.height)))
         }
     }
 
@@ -261,7 +262,7 @@ struct ScreenPanel: View {
             }
         }
         .aspectRatio(full.width / full.height, contentMode: .fit)
-        .frame(maxWidth: 560)
+        .frame(maxWidth: 400, maxHeight: 260)
     }
 }
 
@@ -313,6 +314,9 @@ struct LogView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 1) {
+                    if model.logLines.isEmpty {
+                        Text("Messages from SofaSplit and the games appear here.").font(.caption).foregroundStyle(.secondary)
+                    }
                     ForEach(Array(model.logLines.enumerated()), id: \.offset) { i, line in
                         Text(line).font(.system(size: 11, design: .monospaced)).textSelection(.enabled).id(i)
                     }

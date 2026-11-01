@@ -162,7 +162,9 @@ struct GameDetailView: View {
     }
 
     func playBar(_ handler: GameHandler?) -> some View {
-        let players = model.allSlotIDs.filter { model.assignment($0) != .none }.count
+        let shared = model.sharedSlot != nil
+        let players = shared ? max(1, model.controllers.devices.count)
+                             : model.allSlotIDs.filter { model.assignment($0) != .none }.count
         let needsAX = handler.map { !$0.bool("Hook.Inject", default: true) || $0.string("Hook.WindowPositioning") == "accessibility" } ?? false
         return HStack {
             if needsAX && !WindowPositioner.isTrusted {
@@ -170,7 +172,10 @@ struct GameDetailView: View {
                     Label("Grant Accessibility to position windows", systemImage: "lock.shield")
                 }
             }
-            Text(model.session.status.isEmpty ? "\(players) player\(players == 1 ? "" : "s") ready" : model.session.status)
+            Text(model.session.status.isEmpty
+                 ? (shared ? "Shared screen · \(players) player\(players == 1 ? "" : "s")"
+                           : "\(players) player\(players == 1 ? "" : "s") ready")
+                 : model.session.status)
                 .foregroundStyle(.secondary)
             Spacer()
             Button("Copy Diagnostics") { model.copyDiagnostics() }
@@ -271,8 +276,28 @@ struct SlotView: View {
     let id: SlotID
 
     var body: some View {
+        if model.layout(for: id.screen).isShared { shared } else { slot }
+    }
+
+    var shared: some View {
+        let n = model.controllers.devices.count
+        return ZStack {
+            RoundedRectangle(cornerRadius: 4).fill(Color.accentColor.opacity(0.55))
+            VStack(spacing: 4) {
+                Image(systemName: "person.3.fill").font(.title2)
+                Text("All controllers").font(.headline)
+                Text(n == 0 ? "Connect controllers, or play with keyboard & mouse"
+                            : "\(n) controller\(n == 1 ? "" : "s") in one window — for games with their own local co-op")
+                    .font(.caption).lineLimit(3).multilineTextAlignment(.center)
+            }
+            .foregroundStyle(.white)
+            .padding(6)
+        }
+    }
+
+    var slot: some View {
         let a = model.assignment(id)
-        Menu {
+        return Menu {
             Button("Empty") { model.assign(.none, to: id) }
             Button("Keyboard & Mouse") { model.assign(.keyboardMouse, to: id) }
             if !model.controllers.devices.isEmpty { Divider() }

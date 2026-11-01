@@ -2,7 +2,7 @@ import CoreGraphics
 import Foundation
 
 public enum LayoutKind: String, CaseIterable, Codable, Identifiable {
-    case disabled, full, sideBySide, stacked, three, quad, six, eight
+    case disabled, full, shared, sideBySide, stacked, three, quad, six, eight
 
     public var id: String { rawValue }
 
@@ -10,6 +10,7 @@ public enum LayoutKind: String, CaseIterable, Codable, Identifiable {
         switch self {
         case .disabled: return "Not used"
         case .full: return "1 — Full screen"
+        case .shared: return "Shared screen — all controllers in one window"
         case .sideBySide: return "2 — Side by side"
         case .stacked: return "2 — Top / bottom"
         case .three: return "3 — One top, two bottom"
@@ -19,13 +20,17 @@ public enum LayoutKind: String, CaseIterable, Codable, Identifiable {
         }
     }
 
+    /// One copy of the game that sees every controller: for games with their own local multiplayer, which then
+    /// still get SofaSplit's controller fixes (PS4 pads on Bluetooth) and window placement.
+    public var isShared: Bool { self == .shared }
+
     public var slotCount: Int { rects(in: CGRect(x: 0, y: 0, width: 100, height: 100)).count }
 
     /// Slot rectangles in Cocoa coordinates (origin bottom-left), ordered top-left first, row by row.
     public func rects(in r: CGRect) -> [CGRect] {
         switch self {
         case .disabled: return []
-        case .full: return [r]
+        case .full, .shared: return [r]
         case .sideBySide: return Self.grid(cols: 2, rows: 1, in: r)
         case .stacked: return Self.grid(cols: 1, rows: 2, in: r)
         case .three:

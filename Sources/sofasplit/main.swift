@@ -11,6 +11,7 @@ usage: sofasplit <command>
   play <Game.app|binary> [options] Launch a split-screen session
       --handler <file.js>          Handler to use (default: best match, else Generic.js)
       --layout <kind>              full | sideBySide | stacked | three | quad | six | eight (default: by player count)
+                                   shared: one window that sees every controller, for games with local co-op
       --players <n>                Number of instances (default: number of gamepads, at least 1)
       --screen <index>             Screen to use (default 0)
       --keyboard                   Give player 1 the keyboard & mouse instead of a gamepad
@@ -99,8 +100,13 @@ case "play":
     let monitor = ControllerMonitor(scheduleOnMainRunLoop: false)
     let pads = monitor.devices
     let keyboard = args.contains("--keyboard")
-    let count = Int(option("--players") ?? "") ?? max(1, pads.count + (keyboard ? 1 : 0))
-    let layout = option("--layout").flatMap(LayoutKind.init(rawValue:)) ?? {
+    let requestedLayout = option("--layout").flatMap(LayoutKind.init(rawValue:))
+    if requestedLayout?.isShared == true {
+        handler.overrides["Hook.GamepadRouting"] = .bool(false)  // one window sees every controller
+    }
+    let count = requestedLayout?.isShared == true ? 1
+        : Int(option("--players") ?? "") ?? max(1, pads.count + (keyboard ? 1 : 0))
+    let layout = requestedLayout ?? {
         switch count {
         case 1: return .full
         case 2: return .sideBySide

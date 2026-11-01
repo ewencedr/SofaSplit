@@ -78,6 +78,11 @@ final class AppModel: ObservableObject {
     func layout(for screen: Int) -> LayoutKind { layouts[screen] ?? .disabled }
 
     func setLayout(_ kind: LayoutKind, for screen: Int) {
+        // A shared window is the whole session: other screens aren't used alongside it.
+        if kind.isShared { layouts = layouts.mapValues { $0.isShared ? .disabled : $0 } }
+        else if layouts.values.contains(where: \.isShared) && kind != .disabled {
+            layouts = layouts.mapValues { $0.isShared ? .disabled : $0 }
+        }
         layouts[screen] = kind
         assignments = assignments.filter { $0.key.screen != screen || $0.key.slot < kind.slotCount }
     }
@@ -105,8 +110,13 @@ final class AppModel: ObservableObject {
 
     func slotHolding(_ a: Assignment) -> SlotID? { assignments.first { $0.value == a }?.key }
 
+    /// The screen running one shared window for every controller, if any.
+    var sharedSlot: SlotID? {
+        screens.first { layout(for: $0.id).isShared }.map { SlotID(screen: $0.id, slot: 0) }
+    }
+
     private func join(_ device: InputDevice) {
-        guard joinWithButton, !session.isRunning else { return }
+        guard joinWithButton, !session.isRunning, sharedSlot == nil else { return }
         let a = Assignment.gamepad(device.id)
         guard slotHolding(a) == nil else { return }
         if let free = allSlotIDs.first(where: { assignment($0) == .none }) {
@@ -287,6 +297,18 @@ final class AppModel: ObservableObject {
     func play() {
         // A fresh handler: the session reads it on a background queue while the UI keeps using the cached one.
         guard let game = selectedGame, let handler = try? GameLibrary.handler(for: game) else { return }
+        if let shared = sharedSlot {
+            // One window, every controller: no routing, a single copy on the shared screen.
+            handler.overrides["Hook.GamepadRouting"] = .bool(false)
+            guard let screen = screens.first(where: { $0.id == shared.screen }),
+                  let rect = slotRects(for: screen).first else { return }
+            let anyPad = controllers.devices.first.map { Assignment.gamepad($0.id) } ?? .keyboardMouse
+            session.start(handler: handler, app: game.appURL,
+                          slots: [PlayerSlot(screenIndex: screen.id, slotIndex: 0, frame: rect, scale: screen.scale,
+                                             assignment: anyPad)],
+                          options: SessionOptions(gamepads: controllers.devices))
+            return
+        }
         let slots: [PlayerSlot] = screens.flatMap { screen in
             slotRects(for: screen).enumerated().map { i, rect in
                 PlayerSlot(screenIndex: screen.id, slotIndex: i, frame: rect, scale: screen.scale,

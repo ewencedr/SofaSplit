@@ -27,7 +27,9 @@ Requires macOS 14 or later, on Apple Silicon or Intel. No other permissions or d
    controller can switch between cable and Bluetooth at any time and stays the same player.
 2. **Add a game:** click **Add Game → From Steam Library…** and pick it, or **Choose App…** for games from
    elsewhere. SofaSplit checks the game and tells you how likely it is to work.
-3. **Pick a layout** (side by side, top/bottom, 3, 4, … players).
+3. **Pick a layout** (side by side, top/bottom, 3, 4, … players). For games that already have local co-op on one
+   screen (like Monster Prom), pick **Shared screen**: one window that sees every controller, still with
+   SofaSplit's controller fixes.
 4. **Press a button on each controller.** Each one joins the next free slot.
 5. Click **Play**. The windows open one after another. Each controller only controls its own window, and for
    Steam Input games its light shows the player colour: blue, green, yellow, pink.

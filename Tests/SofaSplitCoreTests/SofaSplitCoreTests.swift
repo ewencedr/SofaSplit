@@ -115,3 +115,109 @@ import Testing
         #expect(throws: HandlerError.self) { try h.runPlay(ctx) }
     }
 }
+
+@Suite struct AnalyzerTests {
+    /// A minimal Unity (Mono) app bundle; `assemblies` maps DLL names to text they should contain.
+    func fakeUnityGame(steam: Bool = true, assemblies: [String: String], plugins: [String] = []) throws -> URL {
+        let app = FileManager.default.temporaryDirectory.appendingPathComponent("sofasplit-tests-\(UUID().uuidString)/Game.app")
+        let contents = app.appendingPathComponent("Contents")
+        let managed = contents.appendingPathComponent("Resources/Data/Managed")
+        try FileManager.default.createDirectory(at: managed, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: contents.appendingPathComponent("Frameworks"), withIntermediateDirectories: true)
+        try Data().write(to: contents.appendingPathComponent("Frameworks/UnityPlayer.dylib"))
+        try "Acme\nBest Game".write(to: contents.appendingPathComponent("Resources/Data/app.info"), atomically: true, encoding: .utf8)
+        if steam {
+            let plugin = contents.appendingPathComponent("PlugIns/steam_api.bundle/Contents/MacOS")
+            try FileManager.default.createDirectory(at: plugin, withIntermediateDirectories: true)
+            try Data().write(to: plugin.appendingPathComponent("libsteam_api.dylib"))
+        }
+        for name in plugins {
+            try FileManager.default.createDirectory(at: contents.appendingPathComponent("PlugIns/\(name)"), withIntermediateDirectories: true)
+        }
+        for (name, text) in assemblies { try Data(text.utf8).write(to: managed.appendingPathComponent(name)) }
+        return app
+    }
+
+    let wrapper = "SteamAPI_ISteamMatchmaking_CreateLobby SteamAPI_ISteamNetworkingSockets_ConnectP2P SteamAPI_ISteamNetworking_SendP2PPacket SteamInput ActivateActionSet"
+
+    @Test func lobbyAndMessagingGameIsLikelyAndGetsSteamSettings() throws {
+        let p = GameAnalyzer.analyze(try fakeUnityGame(assemblies: [
+            "com.rlabrecque.steamworks.net.dll": wrapper,
+            "Game.Core.dll": "SteamMatchmaking CreateLobby SendMessageToUser SteamInput GetConnectedControllers",
+        ]))
+        #expect(p.engine == .unity && p.unityScripting == "Mono")
+        #expect(p.steamViaFlatAPI && p.steamFeaturesCertain)
+        #expect(p.steamLobbies && p.steamMessages && p.steamInput)
+        #expect(!p.steamSockets && !p.steamLegacyP2P)  // only in the wrapper, so not evidence
+        #expect(p.assessment.verdict == .likely)
+        let o = p.suggestedOptions
+        #expect(o["Hook.SteamMultiplayer"] == .bool(true))
+        #expect(o["Hook.SteamInput"] == .bool(true))
+        #expect(o["IsolateHome"] == .bool(true))
+        #expect(o["HomeCopies"] == .strings(["Library/Application Support/Acme/Best Game"]))
+    }
+
+    @Test func socketsOnlyGameIsUnlikely() throws {
+        let p = GameAnalyzer.analyze(try fakeUnityGame(assemblies: [
+            "Steamworks.NET.dll": wrapper,
+            "Assembly-CSharp.dll": "SteamNetworkingSockets ConnectP2P CreateListenSocketP2P",
+        ]))
+        #expect(p.steamSockets && !p.steamMessages)
+        #expect(p.assessment.verdict == .unlikely)
+        #expect(p.suggestedOptions["Hook.SteamMultiplayer"] == nil)
+    }
+
+    @Test func wrapperInsideGameAssemblyIsUncertain() throws {
+        let p = GameAnalyzer.analyze(try fakeUnityGame(assemblies: ["Assembly-CSharp-firstpass.dll": wrapper]))
+        #expect(p.steamViaFlatAPI && !p.steamFeaturesCertain)
+        #expect(p.assessment.verdict == .maybe)
+        #expect(p.suggestedOptions["Hook.SteamMultiplayer"] == nil)
+    }
+
+    @Test func nativeSteamBridgeCannotBeEmulated() throws {
+        let p = GameAnalyzer.analyze(try fakeUnityGame(assemblies: ["Framework.dll": "SteamMatchmaking CreateLobby"],
+                                                       plugins: ["Native.bundle"]))
+        #expect(p.usesSteam && !p.steamViaFlatAPI)
+        #expect(p.assessment.reasons.contains { $0.contains("native code") })
+    }
+
+    @Test func gameWithoutSteamMightWorkOverLAN() throws {
+        let p = GameAnalyzer.analyze(try fakeUnityGame(steam: false, assemblies: ["Assembly-CSharp.dll": "LAN"]))
+        #expect(!p.usesSteam)
+        #expect(p.assessment.verdict == .maybe)
+    }
+
+    @Test func readsValveKeyValues() {
+        let vdf = #"""
+        "AppState"
+        {
+            "appid"		"2879840"
+            "name"		"Escape Simulator 2"
+            "installdir"		"Escape Simulator 2"
+        }
+        "libraryfolders" { "0" { "path"		"/Volumes/Games\\SteamLibrary" } }
+        """#
+        #expect(SteamLibrary.values(of: "appid", in: vdf) == ["2879840"])
+        #expect(SteamLibrary.values(of: "installdir", in: vdf) == ["Escape Simulator 2"])
+        #expect(SteamLibrary.values(of: "path", in: vdf) == [#"/Volumes/Games\SteamLibrary"#])
+    }
+
+    @Test func appSettingsOverrideTheHandler() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("sofasplit-tests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("H.js")
+        try #"Game.GUID = ""; Game.GameName = "Generic game"; Game.Hook.SteamInput = false;"#.write(to: url, atomically: true, encoding: .utf8)
+        let h = try GameHandler(url: url)
+        #expect(h.guid == "Genericgame")  // empty GUID falls back to the name
+        h.overrides = ["Hook.SteamInput": .bool(true), "HomeCopies": .strings(["a", "b"]), "GUID": .string("My Game 2")]
+        #expect(h.bool("Hook.SteamInput", default: false))
+        #expect(h.strings("HomeCopies") == ["a", "b"])
+        #expect(h.guid == "MyGame2")
+    }
+
+    @Test func optionValuesRoundTripThroughJSON() throws {
+        let options: [String: OptionValue] = ["a": .bool(true), "b": .int(3), "c": .string("x"), "d": .strings(["y"])]
+        let decoded = try JSONDecoder().decode([String: OptionValue].self, from: JSONEncoder().encode(options))
+        #expect(decoded == options)
+    }
+}

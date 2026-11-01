@@ -1,0 +1,33 @@
+name: Release
+
+# Push a tag like v0.2.0 to build SofaSplit and publish it as a GitHub Release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unit tests
+        run: swift test
+      - name: Build app (universal)
+        run: VERSION="${GITHUB_REF_NAME#v}" UNIVERSAL=1 NO_TESTGAME=1 ./scripts/build.sh
+      - name: Package
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ditto -c -k --sequesterRsrc --keepParent build/SofaSplit.app "SofaSplit-$VERSION.zip"
+          shasum -a 256 "SofaSplit-$VERSION.zip" > "SofaSplit-$VERSION.zip.sha256"
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Tags with a suffix (v0.2.0-beta.1) are published as pre-releases.
+          PRERELEASE=()
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then PRERELEASE=(--prerelease); fi
+          gh release create "$GITHUB_REF_NAME" SofaSplit-*.zip SofaSplit-*.zip.sha256 "${PRERELEASE[@]}" \
+            --title "SofaSplit ${GITHUB_REF_NAME#v}" --notes-file .github/release-notes.md

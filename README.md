@@ -1,105 +1,129 @@
 # SofaSplit
 
-Split-screen co-op on one Mac for games that only have online or LAN multiplayer.
+**Split-screen co-op on one Mac** for games that only have online or LAN multiplayer.
 
-SofaSplit launches one copy of a game per player, gives each copy its own gamepad, keeps every copy
-running while another one has focus, and tiles the windows across your screen(s). For Steam games that
-use lobbies, each copy also gets its own Steam identity, so the copies can join each other.
+SofaSplit starts one copy of a game per player, gives every copy its own gamepad, keeps all of them running
+side by side, and tiles their windows across your screen. For Steam games that use Steam lobbies, every copy
+also gets its own Steam identity, so the copies can join each other, all on one Mac and one Steam account.
 
-It is a native macOS project inspired by [Nucleus Co-op](https://github.com/SplitScreen-Me/splitscreenme-nucleus)
-for Windows. It shares no code with it and is not affiliated with it.
+Inspired by [Nucleus Co-op](https://github.com/SplitScreen-Me/splitscreenme-nucleus) for Windows; SofaSplit is a
+separate, native macOS project.
 
-## How it works
+## Install
+
+1. Download the latest **SofaSplit-….zip** from [Releases](https://github.com/ewencedr/SofaSplit/releases) and double-click it.
+2. Drag **SofaSplit.app** into your **Applications** folder.
+3. Open it. The first time, macOS says it can't verify the app, because SofaSplit isn't signed with a paid
+   Apple Developer certificate. Click **Done**, then go to **System Settings → Privacy & Security**, scroll down
+   to *"SofaSplit" was blocked…* and click **Open Anyway**. This is only needed once.
+
+Requires macOS 14 or later, on Apple Silicon or Intel. No other permissions or downloads are needed.
+
+## Play
+
+1. **Connect the controllers** (Bluetooth or USB). PlayStation, Xbox, Switch Pro and most other gamepads work.
+2. **Add a game:** click **Add Game → From Steam Library…** and pick it, or **Choose App…** for games from
+   elsewhere. SofaSplit checks the game and tells you how likely it is to work.
+3. **Pick a layout** (side by side, top/bottom, 3, 4, … players).
+4. **Press a button on each controller.** Each one joins the next free slot.
+5. Click **Play**. The windows open one after another. Each controller only controls its own window, and for
+   Steam Input games its light shows the player colour: blue, green, yellow, pink.
+6. **Connect the players inside the game**, the same way you would online: host a game in Player 1's window,
+   then join it from the others (with the game's lobby code, its server list, or `127.0.0.1` for direct-IP games).
+
+The keyboard and mouse work in whichever window you click.
+
+## Which games work?
+
+SofaSplit can't add multiplayer to single-player games: the game needs online or LAN multiplayer. When you add a
+game, SofaSplit shows one of these:
+
+| Shown | Meaning |
+|---|---|
+| ✅ **Likely works** | The game uses Steam lobbies and Steam messaging, which SofaSplit emulates between the windows |
+| 🟠 **Might work** | Works if the game has LAN or direct-IP multiplayer, or SofaSplit couldn't tell for sure. Try it |
+| ❌ **Probably won't work** | The game's multiplayer depends on something SofaSplit can't emulate yet (see the reason shown) |
+
+Not supported: Mac App Store games (they're encrypted) and games with anti-cheat.
+
+### Tested games
+
+| Game | Status | Notes |
+|---|---|---|
+| Escape Simulator 2 | ✅ Works | Host in Player 1, join with the lobby code. Has its own optimized settings |
+
+Tried a game? Please [report it](https://github.com/ewencedr/SofaSplit/issues/new?template=game-report.md),
+whether it worked or not, so the list grows.
+
+## When something doesn't work
+
+- **Open Game settings** below the layout. The detected options can be switched on or off:
+  - *Steam multiplayer between windows*: turn on if the windows can't find or join each other's Steam lobby.
+  - *Route Steam Input controllers*: turn on if every controller moves every window.
+  - *Separate saves for each player*: turn off if the game can't find its save or settings.
+  - *Keep every window running* and *Borderless windows*: turn off if a game misbehaves with them.
+- **A window stays black:** wait a minute. macOS checks every new copy of a game the first time it starts.
+- **Still stuck?** Click **Copy Diagnostics** and paste it into a [bug report](https://github.com/ewencedr/SofaSplit/issues/new?template=bug.md).
+
+---
+
+## For developers
+
+### Build from source
+
+Needs the Xcode Command Line Tools (`xcode-select --install`).
+
+```sh
+git clone https://github.com/ewencedr/SofaSplit.git && cd SofaSplit
+./scripts/build.sh            # -> build/SofaSplit.app (+ build/TestGame.app, a diagnostic window)
+swift test
+```
+
+`UNIVERSAL=1 ./scripts/build.sh` builds for Apple Silicon and Intel (needs full Xcode). With only the Command
+Line Tools, `swift test` sometimes fails with "plugin for module 'TestingMacros' not found"; run it again.
+Releases are built by GitHub Actions: pushing a tag like `v0.2.0` publishes `SofaSplit-0.2.0.zip`.
+
+### How it works
 
 | Problem | What SofaSplit does |
 |---|---|
-| A game can only run once | Each player gets an APFS clone of the `.app` (no extra disk space) with its own bundle ID (`<id>.sofasplit<N>`), launched directly |
+| A game only runs once | Each player gets an APFS clone of the `.app` (no extra disk space) with its own bundle ID, launched directly |
 | Every window reacts to every controller | `libSofaSplitHook.dylib`, injected with `DYLD_INSERT_LIBRARIES`, hides all but the assigned pad from IOKit HID, GameController and Steam Input |
-| Background windows pause or stop reading input | The hook keeps `NSApp.isActive` true, drops resign-active notifications, enables background controller events and disables App Nap |
-| Windows need to be tiled | The hook places each window in its slot (optionally borderless) and blocks native fullscreen; the Accessibility API is the fallback |
-| Copies on one Steam account can't join each other | The hook gives each copy its own Steam ID and runs Steam lobbies and `ISteamNetworkingMessages` locally between the copies |
-| Every game is different | Per-game JavaScript handlers (JavaScriptCore) with options and a `Game.Play(Context)` hook |
+| Background windows pause | The hook keeps the app "active", drops resign-active notifications, enables background controller events and disables App Nap |
+| Windows need tiling | The hook places each window in its slot, borderless, and blocks native fullscreen (Accessibility API as fallback) |
+| Copies on one Steam account can't join each other | The hook gives each copy its own Steam ID (from the unused "web instance" range) and runs Steam lobbies and `ISteamNetworkingMessages` locally between the copies over Unix sockets. Login, ownership, DLC, achievements and cloud saves still go through the real Steam client |
+| Every game is different | The analyzer (`GameAnalyzer.swift`) detects the engine, the Steam app ID and which Steam APIs the game's code calls, and sets options; JavaScript handlers cover the rest |
 
-## Requirements
+### Handlers
 
-- macOS 14 or later (developed on macOS 27, Apple Silicon)
-- Xcode Command Line Tools (`xcode-select --install`) to build
-- Games that are not from the Mac App Store (those are encrypted and can't be hooked)
+A handler is a JavaScript file with a game's options and an optional `Game.Play(Context)` function that runs
+before each copy starts (to edit config files, set arguments, and so on). The handlers in `Handlers/` ship inside
+the app. Your own go in `~/Library/Application Support/SofaSplit/handlers/`, and a file there with the same name
+replaces the built-in one; the app's **Edit…** button creates that copy for you. `Handlers/_Template.js`
+documents every option and helper, and `Handlers/EscapeSimulator2.js` is a full example. Contributions of
+handlers for more games are very welcome.
 
-## Build
-
-```sh
-./scripts/build.sh
-open build/SofaSplit.app
-swift test        # unit tests
-```
-
-With only the Command Line Tools installed, `swift test` sometimes fails with
-"plugin for module 'TestingMacros' not found". That's an intermittent toolchain issue; run it again.
-
-This produces `build/SofaSplit.app` (GUI, `sofasplit` CLI, and a universal hook for native and Rosetta games)
-and `build/TestGame.app`, a diagnostic window that shows what each instance sees.
-
-## Use
-
-1. **Add Game…** and pick the game's `.app` (Steam games are in `~/Library/Application Support/Steam/steamapps/common`).
-   A matching handler is chosen automatically, otherwise `Generic.js`.
-2. Pick a layout per screen (full, side by side, top/bottom, 3, 4, 6 or 8 players).
-3. Press a button on each gamepad to join a slot, or click a slot to assign a pad or the keyboard and mouse.
-4. Click **Play**.
-5. Connect the copies the way the game does multiplayer: host in player 1, join from the others.
-
-The CLI does the same:
+### CLI
 
 ```sh
-SS="build/SofaSplit.app/Contents/MacOS/sofasplit"
-"$SS" controllers                                   # connected pads and their routing keys
-"$SS" play /path/to/Game.app --players 2 --layout sideBySide
-"$SS" play build/TestGame.app --players 2           # self-test
+SS=/Applications/SofaSplit.app/Contents/MacOS/sofasplit
+$SS steam-games                 # installed Steam games with a Mac version
+$SS analyze /path/to/Game.app   # compatibility check and the settings it would use
+$SS controllers                 # connected gamepads
+$SS play /path/to/Game.app --players 2 --layout sideBySide
 ```
 
-Ctrl-C (or `kill`) stops every instance.
-
-Data lives in `~/Library/Application Support/SofaSplit/`: `handlers/`, `library.json`, `sofasplit.log`, and
-`content/<Game>/Instance<N>/` with the clone, `output.log` and `hook.log` for each player.
-
-## Handlers
-
-Handlers are JavaScript files in `~/Library/Application Support/SofaSplit/handlers/`. Bundled ones are copied
-there on first launch and never overwritten afterwards. `Handlers/_Template.js` documents every option and
-`Context` helper: per-player arguments and environment, INI/JSON/plist editing, per-instance preferences, files
-copied into the clone, an isolated `HOME`, and the Steam app ID. `Handlers/EscapeSimulator2.js` is a complete
-real-world example.
-
-### Steam games
-
-- `Game.SteamID`: each clone gets `steam_appid.txt` and the `SteamAppId`/`SteamGameId` environment the Steam client
-  sets, so `SteamAPI_RestartAppIfNecessary` doesn't close the clone and relaunch the original.
-- `Game.Hook.SteamInput`: for games that read pads through Steam Input. Each instance gets one controller, and its
-  lightbar shows the player colour (blue, green, yellow, pink, …).
-- `Game.Hook.SteamMultiplayer`: each instance gets its own Steam ID (the "web instance" range, so it never matches
-  a real account). Lobbies and `ISteamNetworkingMessages` run between the instances over local Unix sockets. Login,
-  game ownership, DLC, achievements, cloud saves and Steam Input still go through the real Steam client. The legacy
-  `ISteamNetworking` P2P API and `ISteamNetworkingSockets` aren't emulated yet.
-
-## Limitations
-
-- The game needs some way to connect copies: LAN, direct IP, or Steam lobbies with `SteamMultiplayer`.
-  SofaSplit doesn't add multiplayer to single-player games.
-- Keyboard and mouse only reach the focused window; macOS can't route a second keyboard to a background app.
-- Games that use the hardened runtime are re-signed ad-hoc per clone so the hook can load, which reads the whole
-  game once per player.
-- Games using exclusive fullscreen (display capture) can't be tiled; run them windowed.
-- Steam's "random match" reports no lobbies while `SteamMultiplayer` is on, so the game hosts instead.
+Data lives in `~/Library/Application Support/SofaSplit/`: the library, logs, and `content/<Game>/Instance<N>/`
+with each player's copy, `output.log` and `hook.log`.
 
 ## Legal
 
-- SofaSplit is not affiliated with or endorsed by Valve, SplitScreen.Me / Nucleus Co-op, Sony, or any game developer.
-  Trademarks belong to their owners.
-- The repository contains no game files, no Steamworks SDK files, and no code from Nucleus Co-op. The Steam
+- SofaSplit is not affiliated with or endorsed by Valve, SplitScreen.Me / Nucleus Co-op, Sony, Microsoft,
+  Nintendo, or any game developer. Trademarks belong to their owners.
+- The repository contains no game files, no Steamworks SDK files and no code from Nucleus Co-op. The Steam
   structures it needs for interoperability are declared from scratch.
-- SofaSplit doesn't bypass DRM, ownership checks or purchases. You need to own the game and be signed in to Steam,
-  which keeps handling login, ownership and DLC. Every copy runs locally on your own Mac.
+- SofaSplit doesn't bypass DRM, ownership checks or purchases: you need to own the game and be signed in to
+  Steam. Every copy runs locally on your own Mac.
 - Injecting into games and running modified copies may conflict with some games' terms of use. **Don't use it
   with games that have anti-cheat** (Easy Anti-Cheat, BattlEye, VAC-secured servers): that can get an account banned.
 - Use at your own risk. This is not legal advice.

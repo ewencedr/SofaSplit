@@ -23,28 +23,54 @@ public enum Paths {
 
     public static var hookLibrary: URL? {
         if let p = ProcessInfo.processInfo.environment["SOFASPLIT_HOOK_PATH"] { return URL(fileURLWithPath: p) }
-        return resourceCandidates
-            .map { $0.appendingPathComponent("libSofaSplitHook.dylib") }
-            .first { FileManager.default.fileExists(atPath: $0.path) }
+        guard let bundled = resourceCandidates
+            .map({ $0.appendingPathComponent("libSofaSplitHook.dylib") })
+            .first(where: { FileManager.default.fileExists(atPath: $0.path) }) else { return nil }
+        return installedHook(from: bundled) ?? bundled
     }
 
-    static var bundledHandlers: URL? {
+    /// Copies the hook out of the app into the data folder and clears its quarantine flag. A downloaded app
+    /// is quarantined (and may run from a randomized read-only path), and a quarantined library injected
+    /// into a game would trigger Gatekeeper inside the game.
+    static func installedHook(from bundled: URL) -> URL? {
+        let fm = FileManager.default
+        let dest = root.appendingPathComponent("lib/libSofaSplitHook.dylib")
+        func attrs(_ u: URL) -> (Int, Date)? {
+            guard let a = try? fm.attributesOfItem(atPath: u.path) else { return nil }
+            return ((a[.size] as? Int) ?? 0, (a[.modificationDate] as? Date) ?? .distantPast)
+        }
+        if let src = attrs(bundled), let cur = attrs(dest), src.0 == cur.0, cur.1 >= src.1 { return dest }
+        do {
+            try fm.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? fm.removeItem(at: dest)
+            try fm.copyItem(at: bundled, to: dest)
+            removexattr(dest.path, "com.apple.quarantine", 0)
+            return dest
+        } catch {
+            return nil
+        }
+    }
+
+    public static var bundledHandlers: URL? {
         let candidates = resourceCandidates.map { $0.appendingPathComponent("Handlers") }
             + [URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("Handlers")]
         return candidates.first { FileManager.default.fileExists(atPath: $0.path) }
     }
 
-    /// Creates the data folders and installs bundled handlers that the user doesn't have yet.
+    /// Creates the data folders and keeps a reference copy of the handler template in the user's handlers folder.
+    /// Bundled handlers are read from the app itself, so updates reach users; files in the folder override them.
     public static func bootstrap() {
         let fm = FileManager.default
         for dir in [root, handlers, content] {
             try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         }
-        guard let bundled = bundledHandlers,
-              let files = try? fm.contentsOfDirectory(at: bundled, includingPropertiesForKeys: nil) else { return }
-        for file in files where file.pathExtension == "js" {
-            let dest = handlers.appendingPathComponent(file.lastPathComponent)
-            if !fm.fileExists(atPath: dest.path) { try? fm.copyItem(at: file, to: dest) }
+        // Old game copies left behind if the app quit while deleting them.
+        let trash = content.appendingPathComponent(".trash")
+        DispatchQueue.global(qos: .background).async { try? fm.removeItem(at: trash) }
+        if let template = bundledHandlers?.appendingPathComponent("_Template.js"), fm.fileExists(atPath: template.path) {
+            let dest = handlers.appendingPathComponent("_Template.js")
+            try? fm.removeItem(at: dest)
+            try? fm.copyItem(at: template, to: dest)
         }
     }
 }

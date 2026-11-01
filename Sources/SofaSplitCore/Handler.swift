@@ -55,7 +55,11 @@ public final class GameHandler {
 
     // MARK: Property access
 
+    /// Options set in the app for this game ("Hook.SteamInput": true, …); they win over the script's values.
+    public var overrides: [String: OptionValue] = [:]
+
     func value(_ path: String) -> JSValue? {
+        if let o = overrides[path] { return JSValue(object: o.object, in: context) }
         var v: JSValue? = game
         for part in path.split(separator: ".") { v = v?.forProperty(String(part)) }
         guard let v, !v.isUndefined, !v.isNull else { return nil }
@@ -72,8 +76,9 @@ public final class GameHandler {
 
     public var gameName: String { string("GameName") ?? url.deletingPathExtension().lastPathComponent }
     public var guid: String {
-        let raw = string("GUID") ?? gameName
-        return raw.components(separatedBy: CharacterSet.alphanumerics.inverted).joined()
+        let clean = { (s: String) in s.components(separatedBy: CharacterSet.alphanumerics.inverted).joined() }
+        let id = clean(string("GUID") ?? "")
+        return id.isEmpty ? clean(gameName) : id
     }
     public var executableName: String? { string("ExecutableName") }
     public var bundleIdentifier: String? { string("BundleIdentifier") }
@@ -292,14 +297,28 @@ func assignKeyPath(_ dict: inout [String: Any], _ keyPath: String, _ value: Any)
     assign(&dict, keyPath.split(separator: ".")[...])
 }
 
+/// Handlers shipped inside the app plus the user's own; a user file with the same name replaces the bundled one.
 public enum HandlerStore {
-    public static func all() -> [GameHandler] {
-        let files = (try? FileManager.default.contentsOfDirectory(at: Paths.handlers, includingPropertiesForKeys: nil)) ?? []
-        return files.filter { $0.pathExtension == "js" && !$0.lastPathComponent.hasPrefix("_") }
-            .sorted { $0.lastPathComponent < $1.lastPathComponent }
-            .compactMap { url in
-                do { return try GameHandler(url: url) } catch { log("Skipping handler: \(error.localizedDescription)"); return nil }
+    /// Handler file names ("Generic.js") mapped to the file that's used.
+    public static func files() -> [String: URL] {
+        var result: [String: URL] = [:]
+        for dir in [Paths.bundledHandlers, Paths.handlers].compactMap({ $0 }) {
+            let urls = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
+            for url in urls where url.pathExtension == "js" && !url.lastPathComponent.hasPrefix("_") {
+                result[url.lastPathComponent] = url
             }
+        }
+        return result
+    }
+
+    public static func url(for file: String) -> URL {
+        files()[file] ?? Paths.handlers.appendingPathComponent(file)
+    }
+
+    public static func all() -> [GameHandler] {
+        files().sorted { $0.key < $1.key }.compactMap { _, url in
+            do { return try GameHandler(url: url) } catch { log("Skipping handler: \(error.localizedDescription)"); return nil }
+        }
     }
 
     /// Picks the handler written for this app, falling back to Generic.js.

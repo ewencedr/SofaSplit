@@ -5,6 +5,8 @@ let usage = """
 usage: sofasplit <command>
 
   controllers                      List connected gamepads and their routing keys
+  steam-games                      List installed Steam games that have a Mac version
+  analyze <Game.app>               Check whether a game is likely to work and which settings it needs
   handlers                         List installed handlers
   play <Game.app|binary> [options] Launch a split-screen session
       --handler <file.js>          Handler to use (default: best match, else Generic.js)
@@ -36,6 +38,20 @@ case "controllers":
     if monitor.devices.isEmpty { print("No gamepads detected.") }
     for (i, d) in monitor.devices.enumerated() { print("\(i)  \(d.id)  \(d.name)") }
 
+case "analyze":
+    guard let target = args.first else { fail("usage: sofasplit analyze <Game.app>") }
+    let app = URL(fileURLWithPath: (target as NSString).expandingTildeInPath).standardizedFileURL
+    let p = GameAnalyzer.analyze(app)
+    let (verdict, reasons) = p.assessment
+    print("\(app.lastPathComponent): \(verdict.rawValue)")
+    for r in reasons { print("  - \(r)") }
+    print("  engine: \(p.engine.rawValue)\(p.unityScripting.map { " (\($0))" } ?? ""), steam app id: \(p.steamAppID ?? "-")")
+    print("  steam: api=\(p.usesSteam) flat=\(p.steamViaFlatAPI) lobbies=\(p.steamLobbies) messages=\(p.steamMessages) sockets=\(p.steamSockets) legacyP2P=\(p.steamLegacyP2P) input=\(p.steamInput)")
+    print("  suggested settings: \(p.suggestedOptions.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: ", "))")
+
+case "steam-games":
+    for g in SteamLibrary.installedGames() { print("\(g.id.padding(toLength: 9, withPad: " ", startingAt: 0)) \(g.name)  \(g.app.path)") }
+
 case "handlers":
     print("Handlers in \(Paths.handlers.path):")
     for h in HandlerStore.all() {
@@ -56,6 +72,11 @@ case "play":
             handler = h
         } else { fail("No handler found") }
     } catch { fail(error.localizedDescription) }
+
+    if handler.isGeneric {
+        handler.overrides = GameAnalyzer.analyze(app).suggestedOptions
+        handler.overrides["GUID"] = .string(app.deletingPathExtension().lastPathComponent)
+    }
 
     _ = NSApplication.shared  // needed for NSScreen
     let monitor = ControllerMonitor(scheduleOnMainRunLoop: false)

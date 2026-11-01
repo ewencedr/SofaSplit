@@ -15,8 +15,10 @@ struct SofaSplitMain: App {
         }
         .commands {
             CommandGroup(after: .newItem) {
-                Button("Add Game…") { model.addGame() }.keyboardShortcut("o")
+                Button("Add from Steam Library…") { model.showSteamLibrary = true }.keyboardShortcut("o", modifiers: [.command, .shift])
+                Button("Add Game…") { model.chooseGameFile() }.keyboardShortcut("o")
                 Divider()
+                Button("Copy Diagnostics") { model.copyDiagnostics() }
                 Button("Open Handlers Folder") { NSWorkspace.shared.open(Paths.handlers) }
                 Button("Open Instances Folder") { NSWorkspace.shared.open(Paths.content) }
             }
@@ -51,8 +53,16 @@ struct ContentView: View {
             }
             .navigationSplitViewColumnWidth(min: 200, ideal: 230)
             .safeAreaInset(edge: .bottom) {
-                Button { model.addGame() } label: { Label("Add Game…", systemImage: "plus") }
-                    .buttonStyle(.borderless).padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                HStack {
+                    Menu {
+                        Button("From Steam Library…") { model.showSteamLibrary = true }
+                        Button("Choose App…") { model.chooseGameFile() }
+                    } label: { Label("Add Game", systemImage: "plus") }
+                        .menuStyle(.borderlessButton).fixedSize()
+                    Spacer()
+                    if model.isAddingGame { ProgressView().controlSize(.small) }
+                }
+                .padding(10)
             }
         } detail: {
             if let game = model.selectedGame {
@@ -61,12 +71,14 @@ struct ContentView: View {
                 ContentUnavailableView {
                     Label("No game selected", systemImage: "gamecontroller")
                 } description: {
-                    Text("Add a game (.app) to play it in split-screen with one gamepad per player.")
+                    Text("Add a game to play it in split-screen, with one gamepad per player.")
                 } actions: {
-                    Button("Add Game…") { model.addGame() }.buttonStyle(.borderedProminent)
+                    Button("Add from Steam Library…") { model.showSteamLibrary = true }.buttonStyle(.borderedProminent)
+                    Button("Choose App…") { model.chooseGameFile() }
                 }
             }
         }
+        .sheet(isPresented: $model.showSteamLibrary) { SteamLibrarySheet() }
     }
 }
 
@@ -77,7 +89,9 @@ struct GameRow: View {
             Image(nsImage: NSWorkspace.shared.icon(forFile: game.appPath)).resizable().frame(width: 24, height: 24)
             VStack(alignment: .leading) {
                 Text(game.name).lineLimit(1)
-                Text(game.handlerFile).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                if let verdict = game.profile?.assessment.verdict {
+                    Text(verdict.label).font(.caption).foregroundStyle(verdict.color).lineLimit(1)
+                }
             }
         }
     }
@@ -99,6 +113,7 @@ struct GameDetailView: View {
                     if !FileManager.default.fileExists(atPath: game.appPath) {
                         Label("Game not found at \(game.appPath)", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                     }
+                    CompatibilityBox(game: game)
                     HStack(alignment: .top, spacing: 18) {
                         DevicesPanel().frame(width: 250)
                         VStack(alignment: .leading, spacing: 14) {
@@ -106,6 +121,7 @@ struct GameDetailView: View {
                         }
                     }
                     optionsRow(handler)
+                    GameSettingsBox(game: game)
                 }
                 .padding(20)
             }
@@ -129,7 +145,8 @@ struct GameDetailView: View {
                 ForEach(model.handlerFiles, id: \.self) { Text($0).tag($0) }
             }
             .frame(width: 230)
-            Button("Edit") { NSWorkspace.shared.open(game.handlerURL) }
+            Button("Edit…") { model.editHandler(game) }
+                .help("Opens the handler script. Built-in handlers are copied to your handlers folder first.")
         }
     }
 
@@ -156,6 +173,9 @@ struct GameDetailView: View {
             Text(model.session.status.isEmpty ? "\(players) player\(players == 1 ? "" : "s") ready" : model.session.status)
                 .foregroundStyle(.secondary)
             Spacer()
+            Button("Copy Diagnostics") { model.copyDiagnostics() }
+                .buttonStyle(.borderless)
+                .help("Copies logs and settings for a bug report")
             if model.session.isRunning {
                 Button(role: .destructive) { model.stop() } label: { Label("Stop", systemImage: "stop.fill").frame(width: 90) }
                     .controlSize(.large)
@@ -303,5 +323,170 @@ struct LogView: View {
             .background(Color(nsColor: .textBackgroundColor))
             .onChange(of: model.logLines.count) { _, n in proxy.scrollTo(n - 1, anchor: .bottom) }
         }
+    }
+}
+
+extension GameProfile.Verdict {
+    var label: String {
+        switch self {
+        case .likely: return "Likely works"
+        case .maybe: return "Might work"
+        case .unlikely: return "Probably won't work"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .likely: return "checkmark.circle.fill"
+        case .maybe: return "questionmark.circle.fill"
+        case .unlikely: return "xmark.octagon.fill"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .likely: return .green
+        case .maybe: return .orange
+        case .unlikely: return .red
+        }
+    }
+}
+
+/// What the analyzer found, in plain language.
+struct CompatibilityBox: View {
+    @EnvironmentObject var model: AppModel
+    let game: GameEntry
+
+    var body: some View {
+        GroupBox {
+            if let profile = game.profile {
+                let (verdict, reasons) = profile.assessment
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Label(verdict.label, systemImage: verdict.icon).font(.headline).foregroundStyle(verdict.color)
+                        Spacer()
+                        Text([profile.engine == .other ? nil : profile.engine.rawValue,
+                              profile.steamAppID.map { "Steam \($0)" }].compactMap { $0 }.joined(separator: " · "))
+                            .font(.caption).foregroundStyle(.secondary)
+                        Button("Check Again") { model.reanalyze(game) }.controlSize(.small)
+                    }
+                    ForEach(reasons, id: \.self) { Text("• " + $0).font(.callout).fixedSize(horizontal: false, vertical: true) }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(4)
+            } else {
+                HStack {
+                    Text("This game hasn't been checked yet.").foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Check Compatibility") { model.reanalyze(game) }
+                }
+                .padding(4)
+            }
+        }
+    }
+}
+
+/// The handler options most games need, as checkboxes. Values set here override the handler script.
+struct GameSettingsBox: View {
+    @EnvironmentObject var model: AppModel
+    let game: GameEntry
+
+    // No @State: SwiftUI's State macro needs a compiler plugin that the Command Line Tools don't always load.
+    var body: some View {
+        DisclosureGroup(isExpanded: $model.settingsExpanded) {
+            VStack(alignment: .leading, spacing: 10) {
+                toggle("Hook.GamepadRouting", true, "One gamepad per window",
+                       "Each window only sees the controller assigned to its player.")
+                toggle("Hook.SteamInput", false, "Route Steam Input controllers",
+                       "For games that read controllers through Steam Input. Lights each pad in its player's colour.")
+                toggle("Hook.SteamMultiplayer", false, "Steam multiplayer between windows",
+                       "Gives every window its own Steam identity so they can join each other's Steam lobbies.")
+                toggle("IsolateHome", false, "Separate saves for each player",
+                       "Each player gets their own copy of the game's save and settings folder.")
+                toggle("Hook.ForceFocus", true, "Keep every window running",
+                       "Background windows keep playing and reading their controller.")
+                toggle("Hook.Borderless", true, "Borderless windows", "Removes the title bar from each game window.")
+                field("SteamID", "Steam App ID", "Needed for Steam games started outside Steam, e.g. 2879840")
+                field("StartArguments", "Extra launch arguments", "Passed to every copy of the game")
+            }
+            .padding(.top, 8)
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Game settings").font(.headline)
+                Text("Set automatically when the game was added. Change them if the game misbehaves.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    func toggle(_ key: String, _ defaultValue: Bool, _ title: String, _ help: String) -> some View {
+        Toggle(isOn: Binding(get: { model.boolOption(key, default: defaultValue, for: game) },
+                             set: { model.setOption(key, .bool($0), for: game) })) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                Text(help).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .toggleStyle(.checkbox)
+    }
+
+    func field(_ key: String, _ title: String, _ prompt: String) -> some View {
+        HStack {
+            Text(title).frame(width: 160, alignment: .leading)
+            TextField(prompt, text: Binding(get: { model.stringOption(key, for: game) },
+                                            set: { model.setOption(key, $0.isEmpty ? nil : .string($0), for: game) }))
+                .textFieldStyle(.roundedBorder)
+        }
+    }
+}
+
+/// Installed Steam games with a Mac version, to add with one click.
+struct SteamLibrarySheet: View {
+    @EnvironmentObject var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        let games = model.steamGameList
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Add from Steam Library").font(.title2.bold()).padding()
+            Divider()
+            Group {
+                if let games, games.isEmpty {
+                    ContentUnavailableView("No Mac Steam games found", systemImage: "gamecontroller",
+                                           description: Text("Install a game in Steam, or use Choose App… to pick one yourself."))
+                } else if let games {
+                    List(games) { g in
+                        HStack {
+                            Image(nsImage: NSWorkspace.shared.icon(forFile: g.app.path)).resizable().frame(width: 28, height: 28)
+                            VStack(alignment: .leading) {
+                                Text(g.name)
+                                Text(g.app.lastPathComponent).font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if model.library.games.contains(where: { $0.appPath == g.app.path }) {
+                                Text("Added").foregroundStyle(.secondary)
+                            } else {
+                                Button("Add") {
+                                    model.addGame(at: g.app, name: g.name)
+                                    dismiss()
+                                }
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                } else {
+                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .frame(minHeight: 300)
+            Divider()
+            HStack {
+                Spacer()
+                Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
+            }
+            .padding()
+        }
+        .frame(width: 520, height: 460)
+        .onAppear { model.loadSteamGames() }
     }
 }

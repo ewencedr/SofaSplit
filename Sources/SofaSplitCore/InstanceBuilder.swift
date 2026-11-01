@@ -32,7 +32,7 @@ public enum InstanceBuilder {
                 log("P\(index + 1): reusing instance at \(dest.path)")
             } else {
                 log("P\(index + 1): cloning \(source.lastPathComponent)…")
-                try? fm.removeItem(at: dest)
+                discardInBackground(dest)
                 try fm.copyItem(at: source, to: dest)  // clonefile() on APFS
                 try customize(bundle: dest, handler: handler, index: index, changeBundleID: changeBundleID, inject: inject)
                 try fingerprint.write(to: marker, atomically: true, encoding: .utf8)
@@ -85,6 +85,21 @@ public enum InstanceBuilder {
 
         return PreparedInstance(root: root, appURL: appURL, executableURL: executable, workingDirectory: workDir,
                                 homeURL: home, bundleIdentifier: bundleID)
+    }
+
+    /// Deleting a big game's old copy file by file takes a while, so move it aside and delete it later.
+    static func discardInBackground(_ url: URL) {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: url.path) else { return }
+        let trash = Paths.content.appendingPathComponent(".trash/\(UUID().uuidString)")
+        do {
+            try fm.createDirectory(at: trash.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try fm.moveItem(at: url, to: trash)
+        } catch {
+            try? fm.removeItem(at: url)
+            return
+        }
+        DispatchQueue.global(qos: .background).async { try? fm.removeItem(at: trash) }
     }
 
     static func executableURL(of app: URL) -> URL? {

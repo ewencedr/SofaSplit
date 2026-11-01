@@ -59,6 +59,8 @@ final class AppModel: ObservableObject {
             DispatchQueue.main.async { self?.join(device) }
         }
         selectedGameID = library.games.first?.id
+        // Games added by older versions haven't been analyzed yet.
+        for game in library.games where game.profile == nil { reanalyze(game) }
     }
 
     var selectedGame: GameEntry? { library.games.first { $0.id == selectedGameID } }
@@ -138,14 +140,57 @@ final class AppModel: ObservableObject {
 
     // MARK: Games
 
-    func addGame() {
+    @Published var isAddingGame = false
+    @Published var showSteamLibrary = false
+
+    func chooseGameFile() {
         let panel = NSOpenPanel()
         panel.title = "Choose a game"
         panel.directoryURL = URL(fileURLWithPath: "/Applications")
         panel.allowedContentTypes = [.application, .unixExecutable, .item]
         panel.treatsFilePackagesAsDirectories = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        if let entry = library.add(app: url) { selectedGameID = entry.id }
+        addGame(at: url)
+    }
+
+    /// Analyzing reads the game's files, so it runs in the background.
+    func addGame(at app: URL, name: String? = nil) {
+        if let existing = library.games.first(where: { $0.appPath == app.path }) {
+            selectedGameID = existing.id
+            return
+        }
+        isAddingGame = true
+        DispatchQueue.global(qos: .userInitiated).async {
+            let entry = GameLibrary.makeEntry(app: app, name: name)
+            DispatchQueue.main.async {
+                self.isAddingGame = false
+                guard let entry else { return }
+                self.library.games.append(entry)
+                self.selectedGameID = entry.id
+            }
+        }
+    }
+
+    func reanalyze(_ game: GameEntry) {
+        isAddingGame = true
+        DispatchQueue.global(qos: .userInitiated).async {
+            let profile = GameAnalyzer.analyze(game.appURL)
+            DispatchQueue.main.async {
+                self.isAddingGame = false
+                guard let i = self.library.games.firstIndex(where: { $0.id == game.id }) else { return }
+                self.library.games[i].profile = profile
+            }
+        }
+    }
+
+    @Published var steamGameList: [SteamLibrary.Game]?
+    @Published var settingsExpanded = false
+
+    func loadSteamGames() {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let games = SteamLibrary.installedGames()
+            DispatchQueue.main.async { self.steamGameList = games }
+        }
     }
 
     func remove(_ game: GameEntry) {
@@ -158,15 +203,52 @@ final class AppModel: ObservableObject {
         library.games[i].handlerFile = file
     }
 
-    /// Parsed handlers, reused until the file changes (views ask for it on every render).
+    // MARK: Settings
+
+    func setOption(_ key: String, _ value: OptionValue?, for game: GameEntry) {
+        guard let i = library.games.firstIndex(where: { $0.id == game.id }) else { return }
+        var options = library.games[i].options ?? [:]
+        options[key] = value
+        library.games[i].options = options.isEmpty ? nil : options
+    }
+
+    func boolOption(_ key: String, default d: Bool, for game: GameEntry) -> Bool {
+        if case .bool(let b)? = game.options?[key] { return b }
+        return handler(for: game)?.bool(key, default: d) ?? d
+    }
+
+    func stringOption(_ key: String, for game: GameEntry) -> String {
+        switch game.options?[key] {
+        case .string(let s)?: return s
+        case .int(let i)?: return String(i)
+        default: return handler(for: game)?.string(key) ?? ""
+        }
+    }
+
+    /// Bundled handlers live inside the app; editing one makes a copy in the user's handlers folder,
+    /// which then takes precedence.
+    func editHandler(_ game: GameEntry) {
+        let file = game.handlerFile
+        let userCopy = Paths.handlers.appendingPathComponent(file)
+        if !FileManager.default.fileExists(atPath: userCopy.path) {
+            try? FileManager.default.copyItem(at: game.handlerURL, to: userCopy)
+            log("Copied \(file) to your handlers folder; your copy is used from now on.")
+        }
+        NSWorkspace.shared.open(userCopy)
+    }
+
+    /// Parsed handlers for display, reused until the file changes (views ask for it on every render).
     private var handlerCache: [URL: (modified: Date, handler: GameHandler)] = [:]
 
     func handler(for game: GameEntry) -> GameHandler? {
         let url = game.handlerURL
         let modified = (try? FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date) ?? .distantPast
-        if let cached = handlerCache[url], cached.modified == modified { return cached.handler }
+        if let cached = handlerCache[url], cached.modified == modified {
+            cached.handler.overrides = game.options ?? [:]
+            return cached.handler
+        }
         do {
-            let h = try GameHandler(url: url)
+            let h = try GameLibrary.handler(for: game)
             handlerCache[url] = (modified, h)
             if handlerError != nil { DispatchQueue.main.async { self.handlerError = nil } }
             return h
@@ -177,15 +259,13 @@ final class AppModel: ObservableObject {
         }
     }
 
-    var handlerFiles: [String] {
-        ((try? FileManager.default.contentsOfDirectory(atPath: Paths.handlers.path)) ?? [])
-            .filter { $0.hasSuffix(".js") && !$0.hasPrefix("_") }.sorted()
-    }
+    var handlerFiles: [String] { HandlerStore.files().keys.sorted() }
 
     // MARK: Play
 
     func play() {
-        guard let game = selectedGame, let handler = handler(for: game) else { return }
+        // A fresh handler: the session reads it on a background queue while the UI keeps using the cached one.
+        guard let game = selectedGame, let handler = try? GameLibrary.handler(for: game) else { return }
         let slots: [PlayerSlot] = screens.flatMap { screen in
             slotRects(for: screen).enumerated().map { i, rect in
                 PlayerSlot(screenIndex: screen.id, slotIndex: i, frame: rect, scale: screen.scale,
@@ -194,6 +274,43 @@ final class AppModel: ObservableObject {
         }
         session.start(handler: handler, app: game.appURL, slots: slots,
                       options: SessionOptions(gamepads: controllers.devices))
+    }
+
+    // MARK: Diagnostics
+
+    /// Collects what's needed to debug a game into the clipboard, for bug reports.
+    func copyDiagnostics() {
+        func tail(_ url: URL, _ n: Int) -> String {
+            guard let text = try? String(contentsOf: url, encoding: .utf8) else { return "(none)" }
+            return text.split(separator: "\n", omittingEmptySubsequences: false).suffix(n).joined(separator: "\n")
+        }
+        let info = Bundle.main.infoDictionary
+        var out = ["SofaSplit \(info?["CFBundleShortVersionString"] as? String ?? "dev")",
+                   "macOS \(ProcessInfo.processInfo.operatingSystemVersionString)",
+                   "Gamepads: \(controllers.devices.map { "\($0.name) [\($0.id)]" }.joined(separator: ", "))"]
+        if let game = selectedGame {
+            out.append("Game: \(game.name) (\(game.appURL.lastPathComponent)), handler \(game.handlerFile)")
+            if let p = game.profile {
+                let a = p.assessment
+                out.append("Analysis: \(a.verdict.rawValue); engine \(p.engine.rawValue) \(p.unityScripting ?? ""); steam app \(p.steamAppID ?? "-"); "
+                           + "api=\(p.usesSteam) flat=\(p.steamViaFlatAPI) lobbies=\(p.steamLobbies) messages=\(p.steamMessages) "
+                           + "sockets=\(p.steamSockets) legacyP2P=\(p.steamLegacyP2P) input=\(p.steamInput)")
+            }
+            out.append("Settings: \((game.options ?? [:]).sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: ", "))")
+            if let h = handler(for: game) {
+                let dir = Paths.content.appendingPathComponent(h.guid)
+                let instances = ((try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? [])
+                    .filter { $0.lastPathComponent.hasPrefix("Instance") }.sorted { $0.path < $1.path }
+                for inst in instances {
+                    out.append("--- \(inst.lastPathComponent)/hook.log\n" + tail(inst.appendingPathComponent("hook.log"), 40))
+                    out.append("--- \(inst.lastPathComponent)/output.log\n" + tail(inst.appendingPathComponent("output.log"), 40))
+                }
+            }
+        }
+        out.append("--- sofasplit.log\n" + tail(Paths.logFile, 80))
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(out.joined(separator: "\n"), forType: .string)
+        log("Diagnostics copied to the clipboard — paste them into a GitHub issue.")
     }
 
     func stop() { session.stop() }

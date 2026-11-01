@@ -19,6 +19,20 @@ public struct GameEntry: Identifiable, Codable, Hashable {
         self.profile = profile
     }
 
+    enum CodingKeys: String, CodingKey { case id, name, appPath, handlerFile, options, profile }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        appPath = try c.decode(String.self, forKey: .appPath)
+        handlerFile = try c.decode(String.self, forKey: .handlerFile)
+        options = try c.decodeIfPresent([String: OptionValue].self, forKey: .options)
+        // A profile from an older analyzer is dropped (and the game checked again) instead of failing the library.
+        let saved = try? c.decodeIfPresent(GameProfile.self, forKey: .profile)
+        profile = saved?.version == GameProfile.currentVersion ? saved : nil
+    }
+
     public var appURL: URL { URL(fileURLWithPath: appPath) }
     public var handlerURL: URL { HandlerStore.url(for: handlerFile) }
 }

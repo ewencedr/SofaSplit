@@ -6,6 +6,9 @@ public struct GameProfile: Codable, Hashable {
     public enum Engine: String, Codable { case unity = "Unity", unreal = "Unreal", godot = "Godot", other = "Unknown" }
     public enum Verdict: String, Codable { case likely, maybe, unlikely }
 
+    /// Bumped whenever the analyzer learns something new, so saved results get refreshed.
+    public static let currentVersion = 2
+    public var version = GameProfile.currentVersion
     public var engine: Engine = .other
     /// "Mono" or "IL2CPP" for Unity games.
     public var unityScripting: String?
@@ -25,6 +28,11 @@ public struct GameProfile: Codable, Hashable {
     public var steamSockets = false
     public var steamLegacyP2P = false
     public var steamInput = false
+    /// The game requests a Steam login ticket, which an online service verifies with Steam's servers.
+    /// Such a service sees the real account in every window, whatever SofaSplit reports to the game.
+    public var steamAuthTicket = false
+    /// Connects players through Photon (Exit Games' relay service) rather than Steam networking.
+    public var photon = false
     public var hardenedRuntime = false
     public var appStore = false
 
@@ -37,22 +45,26 @@ public struct GameProfile: Codable, Hashable {
             return (.unlikely, ["Mac App Store games are encrypted, so SofaSplit can't run separate copies with their own controller."])
         }
         var verdict = Verdict.maybe
-        if usesSteam && steamViaFlatAPI {
+        let steamNetworking = steamMessages || steamLegacyP2P || steamSockets
+        if photon && steamAuthTicket && !steamNetworking && steamFeaturesCertain {
+            verdict = .unlikely
+            reasons.append("Connects players through Photon, an online service that checks the Steam account. Every window is "
+                           + "signed in to the same account, so the service turns the second player away.")
+        } else if usesSteam && steamViaFlatAPI {
             if !steamFeaturesCertain {
                 reasons.append("Couldn't tell which Steam features the game uses (its Steam library is built into the game). "
                                + "Try it; if the windows can't join each other, turn on Steam multiplayer in the game settings.")
-            } else if steamLobbies && steamMessages {
+            } else if steamLobbies && (steamMessages || steamLegacyP2P) {
                 verdict = .likely
-                reasons.append("Uses Steam lobbies and Steam messaging: SofaSplit gives every window its own Steam identity so they can join each other.")
-                if steamSockets || steamLegacyP2P {
-                    reasons.append("It also contains other Steam networking modes; if joining fails, check the game's network options.")
+                reasons.append("Uses Steam lobbies and Steam networking: SofaSplit gives every window its own Steam identity so they can join each other.")
+                if steamSockets {
+                    reasons.append("It also contains Steam networking sockets, which SofaSplit can't emulate yet; if joining fails, check the game's network options.")
                 }
             } else if steamSockets {
                 verdict = .unlikely
                 reasons.append("Uses Steam networking sockets for multiplayer, which SofaSplit can't emulate yet. LAN or direct IP still work if the game has them.")
-            } else if steamLegacyP2P {
-                verdict = .unlikely
-                reasons.append("Uses Steam's legacy P2P networking, which SofaSplit can't emulate yet. LAN or direct IP still work if the game has them.")
+            } else if steamLegacyP2P || steamMessages {
+                reasons.append("Uses Steam networking without Steam lobbies: works if the game connects players by Steam ID or through LAN.")
             } else if steamLobbies {
                 reasons.append("Uses Steam lobbies; works if the game connects players through them or through LAN.")
             } else {
@@ -62,6 +74,13 @@ public struct GameProfile: Codable, Hashable {
             reasons.append("Talks to Steam from native code, which SofaSplit can't give separate Steam identities: works only with LAN or direct-IP multiplayer.")
         } else {
             reasons.append("Works if the game has LAN or direct-IP multiplayer.")
+        }
+        if photon && steamAuthTicket && steamNetworking {
+            reasons.append("Some features (such as voice chat or cross-play) go through Photon, an online service that checks the "
+                           + "Steam account; those may not work between the windows.")
+        } else if steamAuthTicket && !photon && verdict != .unlikely {
+            reasons.append("Signs in to an online service with the Steam account. If that service refuses the same account twice, "
+                           + "only LAN or direct IP will work.")
         }
         if steamInput { reasons.append("Reads controllers through Steam Input: each window gets its own controller.") }
         if hardenedRuntime { reasons.append("First launch of each player's copy takes longer: it has to be re-signed so the hook can load.") }
@@ -73,7 +92,7 @@ public struct GameProfile: Codable, Hashable {
         var options: [String: OptionValue] = [:]
         if let steamAppID { options["SteamID"] = .string(steamAppID) }
         if steamInput { options["Hook.SteamInput"] = .bool(true) }
-        if usesSteam && steamViaFlatAPI && steamFeaturesCertain && steamLobbies && steamMessages {
+        if usesSteam && steamViaFlatAPI && steamFeaturesCertain && steamLobbies && (steamMessages || steamLegacyP2P) {
             options["Hook.SteamMultiplayer"] = .bool(true)
         }
         if engine == .unity, let company = unityCompany, let product = unityProduct {
@@ -160,16 +179,13 @@ public enum GameAnalyzer {
             if fm.fileExists(atPath: managed.path) {
                 analyzeManagedSteamUsage(managed, into: &p)
             } else if fm.fileExists(atPath: metadata.path) {
-                // IL2CPP: P/Invokes still resolve through dlsym, but the metadata mixes the wrapper's names
-                // with the game's, so only a rough guess is possible.
-                p.steamViaFlatAPI = true
-                p.steamFeaturesCertain = false
-                let found = scan([metadata], for: ["SteamMatchmaking", "CreateLobby", "SendMessageToUser", "SteamInput", "ActivateActionSet"])
-                p.steamLobbies = found.isSuperset(of: ["SteamMatchmaking", "CreateLobby"])
-                p.steamMessages = found.contains("SendMessageToUser")
-                p.steamInput = found.isSuperset(of: ["SteamInput", "ActivateActionSet"])
+                analyzeIL2CPPSteamUsage(contents.appendingPathComponent("Frameworks/GameAssembly.dylib"), into: &p)
             }
         }
+        let managed = data.appendingPathComponent("Managed")
+        let metadata = data.appendingPathComponent("il2cpp_data/Metadata/global-metadata.dat")
+        p.photon = fm.fileExists(atPath: managed.appendingPathComponent("Photon3Unity3D.dll").path)
+            || !scan([metadata], for: ["Photon3Unity3D"]).isEmpty
         return p
     }
 
@@ -190,12 +206,41 @@ public enum GameAnalyzer {
         let evidence = assemblies.filter { !wrappers.contains($0) }
         let found = scan(evidence, for: ["SteamMatchmaking", "CreateLobby", "SendMessageToUser", "ConnectP2P",
                                          "CreateListenSocketP2P", "ConnectRelay", "CreateRelaySocket",
-                                         "SendP2PPacket", "SteamInput", "GetConnectedControllers", "ActivateActionSet"])
+                                         "SendP2PPacket", "SteamInput", "GetConnectedControllers", "ActivateActionSet",
+                                         "GetAuthTicketForWebApi", "GetAuthSessionTicket"])
         p.steamLobbies = found.isSuperset(of: ["SteamMatchmaking", "CreateLobby"])
         p.steamMessages = found.contains("SendMessageToUser")
         p.steamSockets = !found.isDisjoint(with: ["ConnectP2P", "CreateListenSocketP2P", "ConnectRelay", "CreateRelaySocket"])
         p.steamLegacyP2P = found.contains("SendP2PPacket")
         p.steamInput = found.contains("SteamInput") && !found.isDisjoint(with: ["GetConnectedControllers", "ActivateActionSet"])
+        p.steamAuthTicket = !found.isDisjoint(with: ["GetAuthTicketForWebApi", "GetAuthSessionTicket"])
+        // The game's own code is in Assembly-CSharp too: anything found there is real evidence.
+        if !p.steamFeaturesCertain && (p.steamLobbies || p.steamMessages || p.steamSockets || p.steamLegacyP2P) {
+            p.steamFeaturesCertain = true
+        }
+    }
+
+    /// IL2CPP games. Their P/Invokes are compiled into GameAssembly.dylib and still resolve through dlsym, and code
+    /// stripping usually leaves only the Steam functions the game calls. When interfaces games almost never use
+    /// are present too, nothing was stripped and the list says nothing about the game.
+    static func analyzeIL2CPPSteamUsage(_ gameAssembly: URL, into p: inout GameProfile) {
+        let found = scan([gameAssembly], for: [
+            "SteamAPI_ISteamMatchmaking_CreateLobby", "SteamAPI_ISteamNetworkingMessages_SendMessageToUser",
+            "SteamAPI_ISteamNetworkingSockets_ConnectP2P", "SteamAPI_ISteamNetworkingSockets_CreateListenSocketP2P",
+            "SteamAPI_ISteamNetworking_SendP2PPacket", "SteamAPI_ISteamInput_GetConnectedControllers",
+            "SteamAPI_ISteamUser_GetAuthTicketForWebApi", "SteamAPI_ISteamUser_GetAuthSessionTicket",
+            "SteamAPI_ISteamHTMLSurface_", "SteamAPI_ISteamParties_",
+        ])
+        p.steamViaFlatAPI = true
+        p.steamFeaturesCertain = found.isDisjoint(with: ["SteamAPI_ISteamHTMLSurface_", "SteamAPI_ISteamParties_"])
+        p.steamLobbies = found.contains("SteamAPI_ISteamMatchmaking_CreateLobby")
+        p.steamMessages = found.contains("SteamAPI_ISteamNetworkingMessages_SendMessageToUser")
+        p.steamSockets = !found.isDisjoint(with: ["SteamAPI_ISteamNetworkingSockets_ConnectP2P",
+                                                 "SteamAPI_ISteamNetworkingSockets_CreateListenSocketP2P"])
+        p.steamLegacyP2P = found.contains("SteamAPI_ISteamNetworking_SendP2PPacket")
+        p.steamInput = found.contains("SteamAPI_ISteamInput_GetConnectedControllers")
+        p.steamAuthTicket = p.steamFeaturesCertain && !found.isDisjoint(with: ["SteamAPI_ISteamUser_GetAuthTicketForWebApi",
+                                                                               "SteamAPI_ISteamUser_GetAuthSessionTicket"])
     }
 
     /// Which of `tokens` occur in any of the files.

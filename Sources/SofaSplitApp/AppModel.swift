@@ -178,7 +178,16 @@ final class AppModel: ObservableObject {
             DispatchQueue.main.async {
                 self.isAddingGame = false
                 guard let i = self.library.games.firstIndex(where: { $0.id == game.id }) else { return }
-                self.library.games[i].profile = profile
+                var entry = self.library.games[i]
+                entry.profile = profile
+                // Newly detected settings switch on for generic games; settings already stored (the user's or
+                // earlier suggestions) stay as they are.
+                if entry.handlerFile == "Generic.js" {
+                    var options = entry.options ?? [:]
+                    for (key, value) in profile.suggestedOptions where options[key] == nil { options[key] = value }
+                    entry.options = options.isEmpty ? nil : options
+                }
+                self.library.games[i] = entry
             }
         }
     }

@@ -51,6 +51,8 @@ Not supported: Mac App Store games (they're encrypted) and games with anti-cheat
 | Game | Status | Notes |
 |---|---|---|
 | Escape Simulator 2 | ✅ Works | Host in Player 1, join with the lobby code. Has its own optimized settings |
+| Human Fall Flat | ✅ Works | Player 1: Play → Online → Host. Others: Play → Online, pick Player 1's game |
+| Golf With Your Friends | ❌ Doesn't work | Its online service (Photon) checks the Steam account and refuses the same account twice |
 
 Tried a game? Please [report it](https://github.com/ewencedr/SofaSplit/issues/new?template=game-report.md),
 whether it worked or not, so the list grows.
@@ -91,7 +93,7 @@ Releases are built by GitHub Actions: pushing a tag like `v0.2.0` publishes `Sof
 | Every window reacts to every controller | `libSofaSplitHook.dylib`, injected with `DYLD_INSERT_LIBRARIES`, hides all but the assigned pad from IOKit HID, GameController and Steam Input |
 | Background windows pause | The hook keeps the app "active", drops resign-active notifications, enables background controller events and disables App Nap |
 | Windows need tiling | The hook places each window in its slot, borderless, and blocks native fullscreen (Accessibility API as fallback) |
-| Copies on one Steam account can't join each other | The hook gives each copy its own Steam ID (from the unused "web instance" range) and runs Steam lobbies and `ISteamNetworkingMessages` locally between the copies over Unix sockets. Login, ownership, DLC, achievements and cloud saves still go through the real Steam client |
+| Copies on one Steam account can't join each other | The hook gives each copy its own Steam ID (from the unused "web instance" range) and runs Steam lobbies, the lobby list, `ISteamNetworkingMessages` and the older `ISteamNetworking` P2P API locally between the copies over Unix sockets, for both current and older Steamworks.NET. Login, ownership, DLC, achievements and cloud saves still go through the real Steam client |
 | Every game is different | The analyzer (`GameAnalyzer.swift`) detects the engine, the Steam app ID and which Steam APIs the game's code calls, and sets options; JavaScript handlers cover the rest |
 
 ### Handlers

@@ -15,6 +15,7 @@ usage: sofasplit <command>
       --screen <index>             Screen to use (default 0)
       --keyboard                   Give player 1 the keyboard & mouse instead of a gamepad
       --full-frame                 Cover the menu bar and Dock area too
+      --set <Key>=<value>          Override a handler setting, e.g. --set Hook.SteamMultiplayer=true (repeatable)
 """
 
 func fail(_ msg: String) -> Never {
@@ -76,6 +77,17 @@ case "play":
     if handler.isGeneric {
         handler.overrides = GameAnalyzer.analyze(app).suggestedOptions
         handler.overrides["GUID"] = .string(app.deletingPathExtension().lastPathComponent)
+    }
+    for (i, arg) in args.enumerated() where arg == "--set" && i + 1 < args.count {
+        let parts = args[i + 1].split(separator: "=", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { fail("--set expects Key=value") }
+        let value: OptionValue
+        switch parts[1].lowercased() {
+        case "true", "yes", "on": value = .bool(true)
+        case "false", "no", "off": value = .bool(false)
+        default: value = Int(parts[1]).map(OptionValue.int) ?? .string(parts[1])
+        }
+        handler.overrides[parts[0]] = value
     }
 
     _ = NSApplication.shared  // needed for NSScreen

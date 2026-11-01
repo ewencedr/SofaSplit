@@ -187,6 +187,74 @@ import Testing
         #expect(p.assessment.verdict == .maybe)
     }
 
+    /// A minimal Unity IL2CPP app bundle: the Steam P/Invokes live in GameAssembly.dylib, assembly names in the metadata.
+    func fakeIL2CPPGame(gameAssembly: String, metadata: String) throws -> URL {
+        let app = FileManager.default.temporaryDirectory.appendingPathComponent("sofasplit-tests-\(UUID().uuidString)/Game.app")
+        let contents = app.appendingPathComponent("Contents")
+        let meta = contents.appendingPathComponent("Resources/Data/il2cpp_data/Metadata")
+        try FileManager.default.createDirectory(at: meta, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: contents.appendingPathComponent("Frameworks"), withIntermediateDirectories: true)
+        try Data().write(to: contents.appendingPathComponent("Frameworks/UnityPlayer.dylib"))
+        try Data(gameAssembly.utf8).write(to: contents.appendingPathComponent("Frameworks/GameAssembly.dylib"))
+        try Data(metadata.utf8).write(to: meta.appendingPathComponent("global-metadata.dat"))
+        let plugin = contents.appendingPathComponent("PlugIns/steam_api.bundle")
+        try FileManager.default.createDirectory(at: plugin, withIntermediateDirectories: true)
+        return app
+    }
+
+    @Test func legacyP2PGameWithLobbiesIsLikely() throws {
+        // Older Steamworks.NET compiled into firstpass, the game's own code in Assembly-CSharp (Human Fall Flat).
+        let p = GameAnalyzer.analyze(try fakeUnityGame(assemblies: [
+            "Assembly-CSharp-firstpass.dll": wrapper,
+            "Assembly-CSharp.dll": "SteamMatchmaking CreateLobby SendP2PPacket",
+        ]))
+        #expect(p.steamFeaturesCertain && p.steamLobbies && p.steamLegacyP2P)
+        #expect(p.assessment.verdict == .likely)
+        #expect(p.suggestedOptions["Hook.SteamMultiplayer"] == .bool(true))
+    }
+
+    @Test func photonCheckingTheSteamAccountIsUnlikely() throws {
+        // Golf With Your Friends: Steam lobbies only for invites, the game itself runs over Photon.
+        let p = GameAnalyzer.analyze(try fakeIL2CPPGame(
+            gameAssembly: "SteamAPI_ISteamMatchmaking_CreateLobby SteamAPI_ISteamUser_GetAuthTicketForWebApi",
+            metadata: "Photon3Unity3D"))
+        #expect(p.unityScripting == "IL2CPP" && p.steamFeaturesCertain)
+        #expect(p.photon && p.steamAuthTicket && p.steamLobbies && !p.steamMessages)
+        #expect(p.assessment.verdict == .unlikely)
+        #expect(p.assessment.reasons.first?.contains("Photon") == true)
+    }
+
+    @Test func unstrippedIL2CPPIsUncertain() throws {
+        let p = GameAnalyzer.analyze(try fakeIL2CPPGame(
+            gameAssembly: "SteamAPI_ISteamMatchmaking_CreateLobby SteamAPI_ISteamNetworkingMessages_SendMessageToUser SteamAPI_ISteamHTMLSurface_Init",
+            metadata: ""))
+        #expect(!p.steamFeaturesCertain)
+        #expect(p.assessment.verdict == .maybe)
+        #expect(p.suggestedOptions["Hook.SteamMultiplayer"] == nil)
+    }
+
+    @Test func photonOnTheSideOfSteamNetworkingStaysLikely() throws {
+        // Escape Simulator 2: Steam lobbies and messages for the game, Photon only for voice chat.
+        let p = GameAnalyzer.analyze(try fakeUnityGame(assemblies: [
+            "com.rlabrecque.steamworks.net.dll": wrapper,
+            "Photon3Unity3D.dll": "Photon",
+            "Game.Core.dll": "SteamMatchmaking CreateLobby SendMessageToUser GetAuthSessionTicket",
+        ]))
+        #expect(p.photon && p.steamAuthTicket)
+        #expect(p.assessment.verdict == .likely)
+        #expect(p.assessment.reasons.contains { $0.contains("voice chat") })
+    }
+
+    @Test func libraryDropsProfilesFromOlderAnalyzers() throws {
+        let json = #"[{"id":"\#(UUID().uuidString)","name":"Old","appPath":"/A.app","handlerFile":"Generic.js","profile":{"engine":"Unity"}}]"#
+        let games = try JSONDecoder().decode([GameEntry].self, from: Data(json.utf8))
+        #expect(games.count == 1 && games[0].name == "Old" && games[0].profile == nil)
+        var current = GameEntry(name: "New", appPath: "/B.app", handlerFile: "Generic.js", profile: GameProfile())
+        current.options = ["SteamID": .string("1")]
+        let roundTrip = try JSONDecoder().decode([GameEntry].self, from: JSONEncoder().encode([current]))
+        #expect(roundTrip == [current])
+    }
+
     @Test func readsValveKeyValues() {
         let vdf = #"""
         "AppState"

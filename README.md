@@ -40,8 +40,13 @@ The keyboard and mouse work in whichever window you click.
 
 ## Which games work?
 
-SofaSplit can't add multiplayer to single-player games: the game needs online or LAN multiplayer. When you add a
-game, SofaSplit shows one of these:
+**Only some games, for now.** Every game handles controllers, windows and multiplayer its own way, and SofaSplit
+has been tested with a handful of them (see below). Many others won't work yet: for example games whose online
+service checks the Steam account, games that talk to Steam from native code, and anything with anti-cheat. Trying
+a game is safe, and reports help: each one makes the next version better.
+
+SofaSplit can't add multiplayer to single-player games: the game needs online or LAN multiplayer, or its own local
+co-op (Shared screen). When you add a game, SofaSplit shows one of these:
 
 | Shown | Meaning |
 |---|---|

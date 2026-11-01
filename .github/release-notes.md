@@ -19,5 +19,12 @@ See the [README](https://github.com/ewencedr/SofaSplit#readme) for how to add ga
   current macOS (Unity's old input system), and can be presented with Xbox button numbering where a game expects it.
 - Add games from your Steam library; SofaSplit checks each game and picks the right settings.
 
-Tested with Escape Simulator 2, Human Fall Flat and Monster Prom. This is a beta: please
-[report](https://github.com/ewencedr/SofaSplit/issues/new/choose) what works and what doesn't.
+## Which games
+
+Tested and working: **Escape Simulator 2**, **Human Fall Flat** and **Monster Prom**.
+
+SofaSplit does **not** work with every game yet. Each game handles controllers, windows and multiplayer
+differently, and many haven't been tried. Known not to work: games whose online service checks the Steam account
+(e.g. Golf With Your Friends), games that reach Steam from native code, and games with anti-cheat. When you add a
+game, SofaSplit tells you how likely it is to work. Please
+[report](https://github.com/ewencedr/SofaSplit/issues/new/choose) any game you try, working or not.

@@ -52,7 +52,12 @@ void SofaSplitHookLog(NSString *fmt, ...) {
     NSString *msg = [[NSString alloc] initWithFormat:fmt arguments:ap];
     va_end(ap);
     FILE *out = gLog ?: stderr;
-    fprintf(out, "[SofaSplitHook %d] %s\n", getpid(), msg.UTF8String);
+    time_t now = time(NULL);
+    struct tm tm;
+    localtime_r(&now, &tm);
+    char stamp[16];
+    strftime(stamp, sizeof stamp, "%H:%M:%S", &tm);
+    fprintf(out, "[%s SofaSplitHook %d] %s\n", stamp, getpid(), msg.UTF8String);
     fflush(out);
 }
 #define HookLog SofaSplitHookLog
@@ -327,8 +332,9 @@ static int NH_bind(int fd, const struct sockaddr *addr, socklen_t len) {
     }
     int r = bind(fd, addr, len);
     int err = errno;
-    // Another instance holding a fixed port is the usual reason LAN/direct-IP play fails between instances.
-    if (shared || r != 0)
+    // Another instance holding a fixed port is the usual reason LAN/direct-IP play fails between instances,
+    // so every fixed port is logged, not only failures: the log then shows which copy holds it.
+    if (port || r != 0)
         HookLog(@"net: bind %s port %u%s -> %s", type == SOCK_DGRAM ? "UDP" : "TCP", port, shared ? " (shared)" : "",
                 r == 0 ? "ok" : strerror(err));
     errno = err;

@@ -51,6 +51,11 @@ Game.Play = function (Context) {
     Context.ModifyIni(engine, "SystemSettings", "ResY", Context.Height);
     Context.ModifyIni(engine, "SystemSettings", "Fullscreen", "False");
     Context.ModifyIni(engine, "SystemSettings", "WindowedFullscreen", "False");
+    // Every copy reads the same game ports (7777, then 7778, 7779… when taken). Starting LAN play, the copies
+    // took each other's, and player 1's game never came up. Player 1 keeps the defaults, so the others still
+    // find and join it; every other player gets its own block of ten.
+    Context.ModifyIni(engine, "URL", "Port", 7777 + Context.PlayerID * 10);
+    Context.ModifyIni(engine, "URL", "PeerPort", 7778 + Context.PlayerID * 10);
     var narrow = Context.Width / Context.Height < 16 / 9 - 0.01;
     Context.ModifyIni(engine, "Engine.LocalPlayer", "AspectRatioAxisConstraint",
                       narrow ? "AspectRatio_MaintainXFOV" : "AspectRatio_MaintainYFOV");

@@ -42,4 +42,17 @@ Game.Play = function (Context) {
   Context.MakeDir("~/Library/Application Support/Borderlands 2/WillowGame/SaveData");
   // UE3 takes the window size in points; the hook then places the window in its slot.
   Context.StartArguments = "-windowed -ResX=" + Context.Width + " -ResY=" + Context.Height + " -nostartupmovies";
+  // This player's own engine settings: the same size and windowed, so a restart or the video menu doesn't go
+  // back to your normal resolution. UE3 keeps the vertical field of view by default, which crops the sides of a
+  // window narrower than 16:9 (side by side it's almost square and looks zoomed in): keep the horizontal one there.
+  var engine = Context.HomeFolder + "/Library/Application Support/Borderlands 2/WillowGame/Config/WillowEngine.ini";
+  if (Context.FileExists(engine)) {
+    Context.ModifyIni(engine, "SystemSettings", "ResX", Context.Width);
+    Context.ModifyIni(engine, "SystemSettings", "ResY", Context.Height);
+    Context.ModifyIni(engine, "SystemSettings", "Fullscreen", "False");
+    Context.ModifyIni(engine, "SystemSettings", "WindowedFullscreen", "False");
+    var narrow = Context.Width / Context.Height < 16 / 9 - 0.01;
+    Context.ModifyIni(engine, "Engine.LocalPlayer", "AspectRatioAxisConstraint",
+                      narrow ? "AspectRatio_MaintainXFOV" : "AspectRatio_MaintainYFOV");
+  }
 };

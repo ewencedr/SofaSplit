@@ -26,6 +26,34 @@ import Testing
     }
 }
 
+@Suite struct AspectRatioTests {
+    @Test func parsesRatios() {
+        #expect(AspectRatio.parse("4:3") == CGFloat(4.0 / 3.0))
+        #expect(AspectRatio.parse(" 16/9 ") == CGFloat(16.0 / 9.0))
+        #expect(AspectRatio.parse("1.5") == 1.5)
+        #expect(AspectRatio.parse("") == nil)
+        #expect(AspectRatio.parse(nil) == nil)
+        #expect(AspectRatio.parse("4:0") == nil)
+        #expect(AspectRatio.parse("wide") == nil)
+    }
+
+    @Test func narrowSlotGetsShorterCentredWindow() {
+        // Side by side on a 2560×1440 screen (below the menu bar).
+        let slot = CGRect(x: 1280, y: 80, width: 1280, height: 1330)
+        let fitted = AspectRatio.fit(slot, minRatio: 4.0 / 3.0)
+        #expect(fitted.width == 1280 && fitted.height == 960)
+        #expect(fitted.minX == slot.minX)
+        #expect(abs(fitted.midY - slot.midY) <= 1)
+        #expect(slot.contains(fitted))
+    }
+
+    @Test func wideEnoughSlotIsUnchanged() {
+        let top = CGRect(x: 0, y: 745, width: 2560, height: 665)  // top / bottom split
+        #expect(AspectRatio.fit(top, minRatio: 4.0 / 3.0) == top)
+        #expect(AspectRatio.fit(top, minRatio: nil) == top)
+    }
+}
+
 @Suite struct FileEditingTests {
     @Test func iniReplacesExistingKeyCaseInsensitively() {
         let out = IniFile.set("[Display]\nWidth=800\nHeight=600\n", section: "display", key: "width", value: "960")

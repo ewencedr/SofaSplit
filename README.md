@@ -75,6 +75,9 @@ whether it worked or not, so the list grows.
   - *Route Steam Input controllers*: turn on if every controller moves every window.
   - *Separate saves for each player*: turn off if the game can't find its save or settings.
   - *Keep every window running* and *Borderless windows*: turn off if a game misbehaves with them.
+  - *Window shape*: side by side, each half of the screen is almost square. If a game looks squashed or cropped
+    there (or falls back to a resolution of its own), pick "At least 4:3" or "At least 16:9": its window gets
+    shorter, with black bars above and below.
 - **A window stays black:** wait a minute. macOS checks every new copy of a game the first time it starts (Intel
   games also get translated by Rosetta the first time).
 - **A controller does nothing in one window:** make sure it's switched on before you press Play. If a controller

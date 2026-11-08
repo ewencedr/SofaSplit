@@ -18,6 +18,9 @@ Game.IsolateHome = false;     // Give each instance its own HOME (saves, Applica
 Game.HomeSymlinks = [];       // With IsolateHome: paths linked to the real home, e.g. ["Library/Application Support/Steam"].
 Game.HomeCopies = [];         // With IsolateHome: paths copied once from the real home to seed each player (saves, settings).
 Game.PauseBetweenStarts = 1500;   // Milliseconds between instance launches.
+Game.MinAspectRatio = "";         // e.g. "4:3" or "16:9": a slot narrower than this (side by side is almost square)
+                                  // gets a shorter window, centred with black bars, for games that refuse or crop
+                                  // narrow windows. "" fills the slot. All sizes below are the fitted window's.
 Game.StartArguments = "";         // e.g. "-screen-width %PIXELWIDTH% -screen-height %PIXELHEIGHT% -screen-fullscreen 0"
                                   // Variables: %PLAYER% %PLAYERID% %WIDTH% %HEIGHT% %PIXELWIDTH% %PIXELHEIGHT% %X% %Y% %INSTANCE%
 Game.Executable = "";             // Binary to start, relative to the .app (default: its CFBundleExecutable), e.g.

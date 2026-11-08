@@ -29,8 +29,12 @@ public final class GameSession: ObservableObject {
 
     public func start(handler: GameHandler, app: URL, slots: [PlayerSlot], options: SessionOptions) {
         guard !isRunning else { return }
-        let players = slots.filter { $0.assignment != .none }
+        var players = slots.filter { $0.assignment != .none }
         guard !players.isEmpty else { log("No players assigned — assign a gamepad or the keyboard to a slot first."); return }
+        // Every later step (Game.Play's sizes, launch arguments, the hook's window frame) sees the fitted window.
+        if let ratio = AspectRatio.parse(handler.string("MinAspectRatio")) {
+            for i in players.indices { players[i].frame = AspectRatio.fit(players[i].frame, minRatio: ratio) }
+        }
         isRunning = true
         cancelled = false
         instances = []

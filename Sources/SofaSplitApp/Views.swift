@@ -445,6 +445,7 @@ struct GameSettingsBox: View {
                 toggle("Hook.ForceFocus", true, "Keep every window running",
                        "Background windows keep playing and reading their controller.")
                 toggle("Hook.Borderless", true, "Borderless windows", "Removes the title bar from each game window.")
+                aspectPicker
                 field("SteamID", "Steam App ID", "Needed for Steam games started outside Steam, e.g. 2879840")
                 field("StartArguments", "Extra launch arguments", "Passed to every copy of the game")
             }
@@ -467,6 +468,28 @@ struct GameSettingsBox: View {
             }
         }
         .toggleStyle(.checkbox)
+    }
+
+    /// Game.MinAspectRatio: how narrow a window the game gets in a side-by-side slot.
+    var aspectPicker: some View {
+        let choices: [(value: String, title: String)] = [("", "Fill the slot"), ("4:3", "At least 4:3"),
+                                                         ("16:10", "At least 16:10"), ("16:9", "At least 16:9")]
+        let current = model.stringOption("MinAspectRatio", for: game)
+        return HStack(alignment: .firstTextBaseline) {
+            Text("Window shape").frame(width: 160, alignment: .leading)
+            VStack(alignment: .leading, spacing: 1) {
+                Picker("", selection: Binding(get: { current },
+                                              set: { model.setOption("MinAspectRatio", .string($0), for: game) })) {
+                    ForEach(choices, id: \.value) { Text($0.title).tag($0.value) }
+                    if !choices.contains(where: { $0.value == current }) { Text(current).tag(current) }
+                }
+                .labelsHidden()
+                .fixedSize()
+                Text("For games that look squashed or cropped side by side: their window gets shorter (black bars "
+                     + "above and below) instead of almost square.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 
     func field(_ key: String, _ title: String, _ prompt: String) -> some View {

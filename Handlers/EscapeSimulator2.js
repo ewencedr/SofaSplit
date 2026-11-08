@@ -10,6 +10,9 @@ Game.Description = "Host a co-op lobby in player 1 and join it with the lobby co
 Game.CloneGame = true;
 Game.ChangeBundleID = true;     // separate Unity PlayerPrefs (window mode, resolution) per player
 Game.PauseBetweenStarts = 4000;
+// The game rejects windows narrower than 4:3 ("This resolution is not valid, we need at least 4:3" in Player.log)
+// and falls back to 720p: side by side, each window gets 4:3 with black bars instead.
+Game.MinAspectRatio = "4:3";
 
 // Each player gets their own saves/settings (seeded from yours), but shares the Steam client.
 Game.IsolateHome = true;

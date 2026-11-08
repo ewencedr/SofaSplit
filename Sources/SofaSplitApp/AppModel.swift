@@ -20,6 +20,7 @@ final class AppModel: ObservableObject {
     let library = GameLibrary()
     let controllers = ControllerMonitor()
     let session = GameSession()
+    private let backdrop = Backdrop()
 
     @Published var selectedGameID: GameEntry.ID? { didSet { applyDefaultLayout() } }
     @Published var screens: [ScreenInfo] = []
@@ -50,6 +51,10 @@ final class AppModel: ObservableObject {
                           session.objectWillChange.eraseToAnyPublisher()] {
             publisher.receive(on: RunLoop.main).sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
         }
+
+        session.$isRunning.receive(on: RunLoop.main).sink { [weak self] running in
+            if !running { self?.backdrop.hide() }
+        }.store(in: &bag)
 
         controllers.$devices.receive(on: RunLoop.main).sink { [weak self] devices in
             self?.dropDisconnected(devices)
@@ -342,8 +347,13 @@ final class AppModel: ObservableObject {
                            assignment: assignment(SlotID(screen: screen.id, slot: i)))
             }
         }
+        // Slots whose window is kept at the game's aspect ratio get black bars instead of the desktop.
+        let ratio = AspectRatio.parse(handler.string("MinAspectRatio"))
+        let letterboxed = slots.filter { $0.assignment != .none && AspectRatio.fit($0.frame, minRatio: ratio) != $0.frame }
+        if !letterboxed.isEmpty { backdrop.show(on: letterboxed.map(\.frame)) }
         session.start(handler: handler, app: game.appURL, slots: slots,
                       options: SessionOptions(gamepads: controllers.devices))
+        if !session.isRunning { backdrop.hide() }
     }
 
     // MARK: Diagnostics

@@ -61,6 +61,33 @@ public enum LayoutKind: String, CaseIterable, Codable, Identifiable {
     }
 }
 
+/// Window shapes a game copes with. Half of a 16:9 screen side by side is almost square, which many games
+/// don't handle: menus that refuse anything narrower than 4:3, or a fixed vertical field of view that crops the
+/// sides. With a minimum ratio, a slot narrower than it gets a shorter window, centred in the slot.
+public enum AspectRatio {
+    /// Parses "4:3", "16/9" or "1.333"; nil for "" or anything unreadable (= fill the slot).
+    public static func parse(_ s: String?) -> CGFloat? {
+        guard let s = s?.trimmingCharacters(in: .whitespaces), !s.isEmpty else { return nil }
+        let parts = s.split(whereSeparator: { $0 == ":" || $0 == "/" })
+            .compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+        let ratio: Double
+        switch parts.count {
+        case 1: ratio = parts[0]
+        case 2 where parts[1] > 0: ratio = parts[0] / parts[1]
+        default: ratio = 0
+        }
+        return ratio > 0 ? CGFloat(ratio) : nil
+    }
+
+    /// The largest rect of at least `minRatio` (width / height) inside `slot`, centred vertically; `slot` itself
+    /// when it's already wide enough. Whole points, so the game gets an integral window size.
+    public static func fit(_ slot: CGRect, minRatio: CGFloat?) -> CGRect {
+        guard let minRatio, minRatio > 0, slot.height > 0, slot.width / slot.height < minRatio - 0.001 else { return slot }
+        let height = (slot.width / minRatio).rounded(.down)
+        return CGRect(x: slot.minX, y: (slot.midY - height / 2).rounded(.down), width: slot.width, height: height)
+    }
+}
+
 public enum Assignment: Hashable, Codable {
     case none
     case keyboardMouse

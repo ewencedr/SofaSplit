@@ -60,6 +60,17 @@ import Testing
         #expect(out == "[Display]\nwidth=960\nHeight=600\n")
     }
 
+    @Test func iniFindsSectionsInWindowsLineEndings() {
+        // Unreal Engine's ini files end lines with "\r\n".
+        let text = "[URL]\r\nPort=7777\r\n\r\n[Engine.LocalPlayer]\r\nA=1\r\n"
+        #expect(IniFile.set(text, section: "URL", key: "Port", value: "7787")
+                == "[URL]\r\nPort=7787\r\n\r\n[Engine.LocalPlayer]\r\nA=1\r\n")
+        #expect(IniFile.set(text, section: "Engine.LocalPlayer", key: "B", value: "2")
+                == "[URL]\r\nPort=7777\r\n\r\n[Engine.LocalPlayer]\r\nA=1\r\nB=2\r\n")
+        #expect(IniFile.set(text, section: "New", key: "C", value: "3")
+                == "[URL]\r\nPort=7777\r\n\r\n[Engine.LocalPlayer]\r\nA=1\r\n\r\n[New]\r\nC=3\r\n")
+    }
+
     @Test func iniAddsKeyAtEndOfSection() {
         let out = IniFile.set("[A]\nx=1\n\n[B]\ny=2", section: "A", key: "z", value: "3")
         #expect(out == "[A]\nx=1\nz=3\n\n[B]\ny=2")

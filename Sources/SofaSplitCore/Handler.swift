@@ -231,11 +231,13 @@ public final class GameHandler {
 
 enum IniFile {
     static func set(_ text: String, section: String, key: String, value: String) -> String {
+        // Windows-made ini files (Unreal Engine games) end lines with "\r\n": match without the "\r", keep it.
+        let cr = text.contains("\r\n") ? "\r" : ""
         var lines = text.components(separatedBy: "\n")
         var inSection = section.isEmpty
         var sectionEnd: Int? = section.isEmpty ? lines.count : nil
         for (i, raw) in lines.enumerated() {
-            let line = raw.trimmingCharacters(in: .whitespaces)
+            let line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             if line.hasPrefix("[") && line.hasSuffix("]") {
                 if inSection { sectionEnd = i; break }
                 inSection = line.dropFirst().dropLast().caseInsensitiveCompare(section) == .orderedSame
@@ -244,17 +246,21 @@ enum IniFile {
             }
             if inSection, let eq = line.firstIndex(of: "="),
                line[..<eq].trimmingCharacters(in: .whitespaces).caseInsensitiveCompare(key) == .orderedSame {
-                lines[i] = "\(key)=\(value)"
+                lines[i] = "\(key)=\(value)" + (raw.hasSuffix("\r") ? "\r" : "")
                 return lines.joined(separator: "\n")
             }
         }
         if let end = sectionEnd {
             var insertAt = end
-            while insertAt > 0 && lines[insertAt - 1].trimmingCharacters(in: .whitespaces).isEmpty { insertAt -= 1 }
-            lines.insert("\(key)=\(value)", at: insertAt)
-        } else {
+            while insertAt > 0 && lines[insertAt - 1].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { insertAt -= 1 }
+            lines.insert("\(key)=\(value)" + cr, at: insertAt)
+        } else if cr.isEmpty {
             if let last = lines.last, !last.isEmpty { lines.append("") }
             lines.append(contentsOf: ["[\(section)]", "\(key)=\(value)"])
+        } else {
+            // Every line keeps its "\r\n"; the new section follows a blank line.
+            if lines.last == "" { lines.removeLast() } else if let last = lines.indices.last { lines[last] += "\r" }
+            lines.append(contentsOf: ["\r", "[\(section)]\r", "\(key)=\(value)\r", ""])
         }
         return lines.joined(separator: "\n")
     }

@@ -20,6 +20,8 @@ Game.HomeCopies = [];         // With IsolateHome: paths copied once from the re
 Game.PauseBetweenStarts = 1500;   // Milliseconds between instance launches.
 Game.StartArguments = "";         // e.g. "-screen-width %PIXELWIDTH% -screen-height %PIXELHEIGHT% -screen-fullscreen 0"
                                   // Variables: %PLAYER% %PLAYERID% %WIDTH% %HEIGHT% %PIXELWIDTH% %PIXELHEIGHT% %X% %Y% %INSTANCE%
+Game.Executable = "";             // Binary to start, relative to the .app (default: its CFBundleExecutable), e.g.
+                                  // "Contents/MacOS/Game" to skip a publisher's launcher.
 Game.WorkingFolder = "";          // Relative to the .app (default: Contents/MacOS).
 Game.SteamID = "";                // Writes steam_appid.txt into each clone's working folder.
 Game.Environment = {};            // Extra environment variables for every instance.
@@ -44,6 +46,9 @@ Game.Hook.LegacyControllerNames = false; // Report a DUALSHOCK 4 by its pre-2020
 Game.Hook.ControllerLayout = "";      // "xbox360": number a DUALSHOCK 4's buttons like an Xbox 360 controller under
                                       // the old macOS driver (A = 16, B = 17, X = 18, Y = 19, Start = 9, d-pad 5-8),
                                       // for games that hard-code that layout.
+Game.Hook.SharedUDPPorts = "";        // LAN games: UDP ports every instance may bind, comma-separated, so the copies
+                                      // see each other's LAN games (Unreal Engine 3: "14001"). Only list discovery
+                                      // ports, never the game's own traffic port.
 Game.Hook.Borderless = true;          // Remove the title bar from the game window.
 Game.Hook.WindowPositioning = "auto"; // "auto" (hook, or Accessibility when not injected) | "hook" | "accessibility" | "none"
 

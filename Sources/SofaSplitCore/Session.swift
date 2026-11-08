@@ -214,6 +214,7 @@ public final class GameSession: ObservableObject {
             if handler.bool("Hook.LegacyControllerNames", default: false) { env["SOFASPLIT_LEGACY_PAD_NAMES"] = "1" }
             if handler.bool("Hook.PlayStationBluetooth", default: true) { env["SOFASPLIT_DS4_BLUETOOTH"] = "1" }
             if let layout = handler.string("Hook.ControllerLayout") { env["SOFASPLIT_PAD_LAYOUT"] = layout }
+            if let ports = handler.string("Hook.SharedUDPPorts"), !ports.isEmpty { env["SOFASPLIT_SHARED_UDP_PORTS"] = ports }
             if useHookFrame {
                 let f = slot.frame
                 env["SOFASPLIT_WINDOW_FRAME"] = "\(f.minX),\(f.minY),\(f.width),\(f.height)"

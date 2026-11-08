@@ -18,6 +18,7 @@
 //   SOFASPLIT_LEGACY_PAD_NAMES  "1"  report PlayStation 4 pads by the name older macOS gave them
 //   SOFASPLIT_DS4_BLUETOOTH     "1"  decode Bluetooth DUALSHOCK 4 reports for HID-element readers (DualShock4Bluetooth.m)
 //   SOFASPLIT_PAD_LAYOUT        "xbox360"  number those pads' buttons like an Xbox 360 controller on macOS
+//   SOFASPLIT_SHARED_UDP_PORTS  "14001"  UDP ports every instance may bind (LAN game discovery between instances)
 //   SOFASPLIT_HOOK_LOG          path of a log file (default stderr)
 
 #import <AppKit/AppKit.h>
@@ -28,8 +29,12 @@
 #import <objc/runtime.h>
 #import <os/lock.h>
 #include <dlfcn.h>
+#include <errno.h>
+#include <netinet/in.h>
 #include <stdatomic.h>
 #include <stdarg.h>
+#include <string.h>
+#include <sys/socket.h>
 
 static NSSet<NSString *> *gAllowedKeys;   // nil = no gamepad filtering
 static NSSet<NSNumber *> *gFallbackOrdinals;
@@ -289,6 +294,47 @@ DYLD_INTERPOSE(NH_IOHIDManagerRegisterDeviceMatchingCallback, IOHIDManagerRegist
 DYLD_INTERPOSE(NH_IOHIDManagerRegisterInputValueCallback, IOHIDManagerRegisterInputValueCallback)
 DYLD_INTERPOSE(NH_IOHIDManagerRegisterDeviceRemovalCallback, IOHIDManagerRegisterDeviceRemovalCallback)
 DYLD_INTERPOSE(NH_IOHIDManagerCopyDevices, IOHIDManagerCopyDevices)
+
+#pragma mark - Shared LAN discovery ports
+
+// LAN games find each other by broadcasting on a fixed UDP port that every copy binds (Unreal Engine 3: 14001).
+// On macOS SO_REUSEADDR alone doesn't let a second socket bind the same port; with SO_REUSEPORT every copy binds
+// it and every copy receives the broadcasts. Only the listed ports get this: unicast to a shared port reaches
+// just one of the sockets, so game traffic ports must stay exclusive.
+enum { kMaxSharedPorts = 16 };
+static uint16_t gSharedUDPPorts[kMaxSharedPorts];
+static int gSharedUDPPortCount;
+
+static BOOL IsSharedUDPPort(uint16_t port) {
+    for (int i = 0; i < gSharedUDPPortCount; i++)
+        if (gSharedUDPPorts[i] == port) return YES;
+    return NO;
+}
+
+static int NH_bind(int fd, const struct sockaddr *addr, socklen_t len) {
+    if (!addr || (addr->sa_family != AF_INET && addr->sa_family != AF_INET6)) return bind(fd, addr, len);
+    uint16_t port = ntohs(addr->sa_family == AF_INET ? ((const struct sockaddr_in *)addr)->sin_port
+                                                     : ((const struct sockaddr_in6 *)addr)->sin6_port);
+    int type = 0;
+    socklen_t typeLen = sizeof type;
+    getsockopt(fd, SOL_SOCKET, SO_TYPE, &type, &typeLen);
+    BOOL shared = port && type == SOCK_DGRAM && IsSharedUDPPort(port);
+    if (shared) {
+        int on = 1;
+        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof on);
+        setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &on, sizeof on);
+    }
+    int r = bind(fd, addr, len);
+    int err = errno;
+    // Another instance holding a fixed port is the usual reason LAN/direct-IP play fails between instances.
+    if (shared || r != 0)
+        HookLog(@"net: bind %s port %u%s -> %s", type == SOCK_DGRAM ? "UDP" : "TCP", port, shared ? " (shared)" : "",
+                r == 0 ? "ok" : strerror(err));
+    errno = err;
+    return r;
+}
+
+DYLD_INTERPOSE(NH_bind, bind)
 
 #pragma mark - Steam Input filtering
 
@@ -779,6 +825,11 @@ __attribute__((constructor)) static void SofaSplitHookInit(void) {
         gBorderless = [env[@"SOFASPLIT_BORDERLESS"] isEqualToString:@"1"];
         gLegacyPadNames = [env[@"SOFASPLIT_LEGACY_PAD_NAMES"] isEqualToString:@"1"];
         SofaSplitDS4Init([env[@"SOFASPLIT_DS4_BLUETOOTH"] isEqualToString:@"1"], env[@"SOFASPLIT_PAD_LAYOUT"]);
+        for (NSString *port in [env[@"SOFASPLIT_SHARED_UDP_PORTS"] componentsSeparatedByString:@","]) {
+            int value = [port stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet].intValue;
+            if (value > 0 && value < 65536 && gSharedUDPPortCount < kMaxSharedPorts)
+                gSharedUDPPorts[gSharedUDPPortCount++] = (uint16_t)value;
+        }
         NSArray<NSString *> *f = [env[@"SOFASPLIT_WINDOW_FRAME"] componentsSeparatedByString:@","];
         if (f.count == 4) {
             gFrame = NSMakeRect(f[0].doubleValue, f[1].doubleValue, f[2].doubleValue, f[3].doubleValue);

@@ -41,7 +41,9 @@ public enum InstanceBuilder {
             bundleID = readBundleID(dest) ?? bundleID
         }
 
-        guard let executable = isBundle ? executableURL(of: appURL!) : source else {
+        // A handler can start a different binary inside the bundle, e.g. the game itself instead of its launcher.
+        let custom = handler.string("Executable").flatMap { $0.isEmpty ? nil : $0 }
+        guard let executable = isBundle ? (custom.map { appURL!.appendingPathComponent($0) } ?? executableURL(of: appURL!)) : source else {
             throw NSError(domain: "SofaSplit", code: 1, userInfo: [NSLocalizedDescriptionKey: "Cannot find the executable inside \(source.path)"])
         }
 

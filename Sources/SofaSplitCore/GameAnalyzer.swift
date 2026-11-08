@@ -159,10 +159,11 @@ public enum GameAnalyzer {
                 let lines = info.split(whereSeparator: \.isNewline).map(String.init)
                 if lines.count >= 2 { p.unityCompany = lines[0]; p.unityProduct = lines[1] }
             }
+        } else if bundleContains(app, where: { $0.contains("UE4") || $0.contains("UnrealEngine") || $0 == "Engine" || $0.hasSuffix(".upk") }) {
+            // Before Godot: Unreal games often ship Wwise sound banks, which are .pck files too.
+            p.engine = .unreal
         } else if bundleContains(app, where: { $0.hasSuffix(".pck") }) {
             p.engine = .godot
-        } else if bundleContains(app, where: { $0.contains("UE4") || $0.contains("UnrealEngine") || $0 == "Engine" }) {
-            p.engine = .unreal
         }
 
         // Steam

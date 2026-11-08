@@ -19,6 +19,7 @@
 //   SOFASPLIT_DS4_BLUETOOTH     "1"  decode Bluetooth DUALSHOCK 4 reports for HID-element readers (DualShock4Bluetooth.m)
 //   SOFASPLIT_PAD_LAYOUT        "xbox360"  number those pads' buttons like an Xbox 360 controller on macOS
 //   SOFASPLIT_SHARED_UDP_PORTS  "14001"  UDP ports every instance may bind (LAN game discovery between instances)
+//   SOFASPLIT_UNHIDE_STEAM_PADS "1"  keep pads that Steam Input hides from SDL (SDL_GAMECONTROLLER_IGNORE_DEVICES)
 //   SOFASPLIT_HOOK_LOG          path of a log file (default stderr)
 
 #import <AppKit/AppKit.h>
@@ -335,6 +336,25 @@ static int NH_bind(int fd, const struct sockaddr *addr, socklen_t len) {
 }
 
 DYLD_INTERPOSE(NH_bind, bind)
+
+#pragma mark - Pads hidden by Steam Input
+
+// With Steam Input on for a game, steamclient (loaded by SteamAPI_Init) puts every pad it takes over into
+// SDL_GAMECONTROLLER_IGNORE_DEVICES, inside the game process, expecting the game to use Steam's virtual pad
+// instead. macOS has no virtual pad and older SDL (2.0.9 in Borderlands 2) can't use Steam's pads any other
+// way, so the game ends up with no controllers. Dropping that variable keeps the real pads; routing still
+// decides which ones each instance sees.
+static BOOL gUnhideSteamPads;
+
+static int NH_setenv(const char *name, const char *value, int overwrite) {
+    if (gUnhideSteamPads && name && !strcmp(name, "SDL_GAMECONTROLLER_IGNORE_DEVICES")) {
+        HookLog(@"pads: ignoring Steam's SDL_GAMECONTROLLER_IGNORE_DEVICES, the game keeps the real pads");
+        return 0;
+    }
+    return setenv(name, value, overwrite);
+}
+
+DYLD_INTERPOSE(NH_setenv, setenv)
 
 #pragma mark - Steam Input filtering
 
@@ -825,6 +845,7 @@ __attribute__((constructor)) static void SofaSplitHookInit(void) {
         gBorderless = [env[@"SOFASPLIT_BORDERLESS"] isEqualToString:@"1"];
         gLegacyPadNames = [env[@"SOFASPLIT_LEGACY_PAD_NAMES"] isEqualToString:@"1"];
         SofaSplitDS4Init([env[@"SOFASPLIT_DS4_BLUETOOTH"] isEqualToString:@"1"], env[@"SOFASPLIT_PAD_LAYOUT"]);
+        gUnhideSteamPads = [env[@"SOFASPLIT_UNHIDE_STEAM_PADS"] isEqualToString:@"1"];
         for (NSString *port in [env[@"SOFASPLIT_SHARED_UDP_PORTS"] componentsSeparatedByString:@","]) {
             int value = [port stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet].intValue;
             if (value > 0 && value < 65536 && gSharedUDPPortCount < kMaxSharedPorts)

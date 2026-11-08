@@ -33,6 +33,9 @@ Game.Hook.GamepadRouting = true;
 Game.Hook.ForceFocus = true;
 Game.Hook.Borderless = true;
 Game.Hook.SharedUDPPorts = "14001";  // UE3's LanAnnouncePort (BaseEngine.ini)
+// Steam Input claims PlayStation pads for this game and hides them from its SDL 2.0.9, which then sees no
+// controller at all (even without SofaSplit). Keep them; SDL's own PS4 driver reads them.
+Game.Hook.UnhideSteamInputPads = true;
 
 Game.Play = function (Context) {
   // The shared save folder must exist before the game follows the link into it.

@@ -49,6 +49,8 @@ Game.Hook.ControllerLayout = "";      // "xbox360": number a DUALSHOCK 4's butto
 Game.Hook.SharedUDPPorts = "";        // LAN games: UDP ports every instance may bind, comma-separated, so the copies
                                       // see each other's LAN games (Unreal Engine 3: "14001"). Only list discovery
                                       // ports, never the game's own traffic port.
+Game.Hook.UnhideSteamInputPads = false; // SDL games: with Steam Input on, Steam hides the real pads from SDL and
+                                      // expects a virtual pad macOS doesn't have, so the game sees none. true keeps them.
 Game.Hook.Borderless = true;          // Remove the title bar from the game window.
 Game.Hook.WindowPositioning = "auto"; // "auto" (hook, or Accessibility when not injected) | "hook" | "accessibility" | "none"
 
